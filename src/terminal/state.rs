@@ -791,7 +791,17 @@ impl TerminalState {
                 }
             }
         }
-        self.persisted_agent_session = None;
+        if session_ref.is_some()
+            || !self
+                .persisted_agent_session
+                .as_ref()
+                .is_some_and(|session| {
+                    session.agent == agent_label
+                        && Self::same_agent_source_family(&session.source, &source, &agent_label)
+                })
+        {
+            self.persisted_agent_session = None;
+        }
         self.hook_authority = Some(HookAuthority {
             source,
             agent_label,
@@ -1327,10 +1337,19 @@ impl TerminalState {
         })
     }
 
+    fn same_agent_source_family(left_source: &str, right_source: &str, agent_label: &str) -> bool {
+        left_source == right_source
+            || matches!(
+                (left_source, right_source, agent_label),
+                ("herdr:jcode", "jcode", "jcode") | ("jcode", "herdr:jcode", "jcode")
+            )
+    }
+
     fn current_session_owner_conflicts(&self, source: &str, agent_label: &str) -> bool {
         self.current_session_identity_for_persistence().is_some_and(
             |(current_source, current_agent, _, _)| {
-                current_source != source || current_agent != agent_label
+                current_agent != agent_label
+                    || !Self::same_agent_source_family(&current_source, source, agent_label)
             },
         )
     }
@@ -1344,7 +1363,7 @@ impl TerminalState {
     ) -> Option<crate::agent_resume::AgentSessionRef> {
         self.current_session_identity_for_persistence().and_then(
             |(current_source, current_agent, current_kind, current_value)| {
-                (current_source == source
+                (Self::same_agent_source_family(&current_source, source, agent_label)
                     && current_agent == agent_label
                     && current_kind == crate::agent_resume::AgentSessionRefKind::Id
                     && session_ref.kind == crate::agent_resume::AgentSessionRefKind::Id
@@ -1412,6 +1431,7 @@ impl TerminalState {
                     "qwen",
                     Some("startup" | "clear" | "resume" | "compact" | "branch")
                 )
+                | ("herdr:jcode", "jcode", Some("startup" | "resume"))
                 | ("herdr:antigravity_cli", "agy", None)
         )
     }
@@ -1828,10 +1848,13 @@ impl TerminalState {
         if !self.accept_hook_report(source, seq) {
             return None;
         }
-        let preserve_foreign_persisted_session = self
-            .persisted_agent_session
-            .as_ref()
-            .is_some_and(|session| session.source != source || session.agent != agent_label);
+        let preserve_foreign_persisted_session =
+            self.persisted_agent_session
+                .as_ref()
+                .is_some_and(|session| {
+                    session.agent != agent_label
+                        || !Self::same_agent_source_family(&session.source, source, agent_label)
+                });
         let process_owns_agent =
             crate::detect::parse_agent_label(agent_label).is_some_and(|agent| {
                 self.detected_agent == Some(agent) && self.recent_agent_process_exit.is_none()
@@ -1998,7 +2021,8 @@ impl TerminalState {
             return;
         };
         let other_authority = self.hook_authority.as_ref().is_some_and(|authority| {
-            authority.source != resume.source || authority.agent_label != resume.agent
+            authority.agent_label != resume.agent
+                || !Self::same_agent_source_family(&authority.source, &resume.source, &resume.agent)
         });
         let other_process = self
             .detected_agent
@@ -6416,5 +6440,63 @@ mod tests {
             terminal.hook_authority.as_ref().unwrap().source,
             "custom:pi"
         );
+    }
+
+    #[test]
+    fn jcode_self_report_and_herdr_jcode_session_hook_cooperate_on_same_pane() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Jcode), AgentState::Idle);
+
+        // Session hook (`herdr:jcode`) records the session identity.
+        let session_ref = crate::agent_resume::AgentSessionRef::id("session_fox_1").unwrap();
+        let mutation = terminal.set_agent_session_ref_for_session_start(
+            "herdr:jcode".into(),
+            "jcode".into(),
+            Some(session_ref.clone()),
+            Some(10),
+            Some("startup".into()),
+        );
+        assert!(mutation.is_some());
+        assert_eq!(
+            terminal
+                .persisted_agent_session
+                .as_ref()
+                .map(|s| s.session_ref.value.as_str()),
+            Some("session_fox_1")
+        );
+
+        // Native TUI reporter (`source = "jcode"`) reports working state + resume_argv
+        // without clobbering `herdr:jcode` session ownership.
+        let working = terminal.set_hook_authority_with_session_ref(
+            "jcode".into(),
+            "jcode".into(),
+            AgentState::Working,
+            None,
+            None,
+            Some(20),
+        );
+        assert!(working.is_some());
+        assert_eq!(terminal.state, AgentState::Working);
+        assert_eq!(
+            terminal
+                .persisted_agent_session
+                .as_ref()
+                .map(|s| s.session_ref.value.as_str()),
+            Some("session_fox_1")
+        );
+        assert!(terminal.record_reported_resume(
+            "jcode",
+            "jcode",
+            Some(20),
+            vec!["jcode".into(), "--resume".into(), "session_fox_1".into()],
+        ));
+        assert!(terminal.reported_resume().is_some());
+
+        // Releasing from the native TUI clears both authority, reported resume, and persisted session.
+        let released = terminal.release_agent_with_mutation("jcode", "jcode", Some(30));
+        assert!(released.is_some());
+        assert!(terminal.hook_authority.is_none());
+        assert!(terminal.reported_resume().is_none());
+        assert!(terminal.persisted_agent_session.is_none());
     }
 }

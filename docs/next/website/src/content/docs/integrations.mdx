@@ -1,6 +1,6 @@
 ---
 title: Integrations
-description: Install Herdr integrations for Pi, OMP, Claude Code, Codex, GitHub Copilot CLI, Devin CLI, Droid, Kimi Code CLI, OpenCode, Kilo Code CLI, Hermes Agent, Qoder CLI, Qwen Code, Letta Code, Cursor Agent CLI, MastraCode, Antigravity CLI, and Grok CLI.
+description: Install Herdr integrations for Pi, OMP, Claude Code, Codex, GitHub Copilot CLI, Devin CLI, Droid, Kimi Code CLI, OpenCode, Kilo Code CLI, Hermes Agent, Qoder CLI, Qwen Code, Letta Code, Jcode, Cursor Agent CLI, MastraCode, Antigravity CLI, and Grok CLI.
 ---
 
 Herdr detects the agents it supports automatically. Install an agent's integration so Herdr can resume the same session after a server restart. Some integrations also report the agent's state directly. See [Agents](/docs/agents/) for which agents Herdr supports and which support Herdr themselves.
@@ -24,6 +24,7 @@ herdr integration install hermes
 herdr integration install qodercli
 herdr integration install qwen
 herdr integration install letta
+herdr integration install jcode
 herdr integration install cursor
 herdr integration install mastracode
 herdr integration install antigravity-cli
@@ -47,6 +48,7 @@ herdr integration uninstall hermes
 herdr integration uninstall qodercli
 herdr integration uninstall qwen
 herdr integration uninstall letta
+herdr integration uninstall jcode
 herdr integration uninstall cursor
 herdr integration uninstall mastracode
 herdr integration uninstall antigravity-cli
@@ -61,7 +63,7 @@ Every integration tells Herdr which session the agent is in, so Herdr can resume
 
 The Pi, OMP, Kimi Code CLI, OpenCode, Kilo Code CLI, and MastraCode integrations also report the agent's state. While they report, Herdr uses them instead of reading the screen. The others leave state to screen detection.
 
-Native session restore requires current Herdr integrations: Pi integration version `2`, OMP version `3`, Claude Code version `6`, Codex version `5`, GitHub Copilot CLI version `2`, Devin CLI version `2`, Droid version `2`, Kimi Code CLI version `3`, Qoder CLI version `2`, Qwen Code version `1`, Letta Code version `1`, Cursor Agent CLI version `1`, Grok CLI version `2`, OpenCode version `5`, Kilo Code CLI version `1`, Hermes Agent version `5`, MastraCode version `1`, or Antigravity CLI version `1`. Check installed versions with `herdr integration status`.
+Native session restore requires current Herdr integrations: Pi integration version `2`, OMP version `3`, Claude Code version `6`, Codex version `5`, GitHub Copilot CLI version `2`, Devin CLI version `2`, Droid version `2`, Kimi Code CLI version `3`, Qoder CLI version `2`, Qwen Code version `1`, Letta Code version `1`, Jcode version `1`, Cursor Agent CLI version `1`, Grok CLI version `2`, OpenCode version `5`, Kilo Code CLI version `1`, Hermes Agent version `5`, MastraCode version `1`, or Antigravity CLI version `1`. Check installed versions with `herdr integration status`.
 
 ## Integrate your own agent
 
@@ -272,6 +274,22 @@ The quiet `SessionStart` hook reports the conversation ID for native restore. Le
 Herdr uses `~/.letta`. The config directory must already exist. Install writes `hooks/herdr-agent-session.sh` (`hooks/herdr-agent-session.ps1` on Windows) and adds a Herdr entry to `settings.json`. Uninstall removes only the matching entry and managed script.
 
 Herdr resumes named conversations with `letta --conversation <id>`. It records the default conversation as `default:<agent-id>` and resumes it with `letta --conversation default --agent <agent-id>`.
+
+## Jcode
+
+Jcode integration installation is experimental and CLI-only. It is not listed in the Settings integration screen or the JSON integration API. `herdr integration status` reports it as `jcode (experimental)`. Agent detection and `herdr agent start --kind jcode` are supported independently of this installation restriction, and Jcode TUI also reports state and its resume command natively when `HERDR_ENV=1`.
+
+Install the Jcode hook:
+
+```bash
+herdr integration install jcode
+```
+
+The `session_start` hook reports the Jcode session ID for native restore. When Jcode TUI is not reporting state directly, state comes from Herdr's screen manifest detection.
+
+Herdr uses `~/.jcode` by default, or `JCODE_HOME` when set. The config directory must already exist. Install writes `hooks/herdr-agent-session.sh` (`hooks/herdr-agent-session.ps1` on Windows) and adds a Herdr entry to `[hooks] session_start` in `config.toml`. Uninstall removes only the matching entry and managed script.
+
+Herdr resumes stored Jcode sessions with `jcode --resume <id>`.
 
 ## Cursor Agent CLI
 

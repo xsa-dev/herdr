@@ -1,0 +1,99 @@
+id = "jcode"
+version = "2026.10.17.1"
+min_engine_version = 2
+updated_at = "2026-10-17T00:00:00Z"
+aliases = ["herdr:jcode", "jcode:client", "jcode:selfdev"]
+
+# Evidence: Jcode TUI (`crates/jcode-tui/src/tui/{ui_input.rs,app/terminal_title.rs}`)
+# and built-in Herdr reporter (`crates/jcode-tui/src/tui/herdr.rs`).
+#
+# Inside Herdr (`HERDR_ENV=1`), Jcode TUI reports `idle`/`working`, session ID,
+# and its `jcode --resume` command natively via `herdr pane report-agent`, and
+# releases the pane on quit. Screen manifest rules provide fallback state when
+# native reporting is unavailable (for example over SSH without a remote Herdr
+# binary) and detect visible confirmation/onboarding prompts.
+
+[[rules]]
+id = "confirmation_or_onboarding_blocked"
+state = "blocked"
+priority = 960
+region = "bottom_non_empty_lines(12)"
+visible_blocker = true
+any = [
+  { contains = ["Enter/Y confirm", "Esc/N cancel"] },
+  { contains = ["Choose Yes or No with arrows", "Esc cancels."] },
+  { contains = ["Choose Yes and press Enter to copy automatically", "No, Esc, Ctrl+C, or /cancel cancels"] },
+]
+
+[[rules]]
+id = "picker_or_viewer_overlay"
+state = "unknown"
+priority = 940
+region = "bottom_non_empty_lines(8)"
+skip_state_update = true
+any = [
+  { contains = ["type to filter", "Esc cancel"] },
+  { contains = ["↑↓ route", "Enter select", "Esc cancel"] },
+  { contains = ["↑↓ choose", "Enter select", "Esc cancel"] },
+  { contains = ["(history search)", "↑↓ select", "Esc cancel"] },
+  { contains = ["Esc to close", "wheel/j/k scroll"] },
+  { contains = ["PgUp/PgDn page", "q/Esc close"] },
+]
+
+[[rules]]
+id = "osc_title_working"
+state = "working"
+priority = 920
+region = "osc_title"
+visible_working = true
+regex = ['\s·\s(?:work\s~[0-9]|working\s*$)']
+
+[[rules]]
+id = "working_status_line"
+state = "working"
+priority = 900
+region = "bottom_non_empty_lines(6)"
+visible_working = true
+any = [
+  { line_regex = [
+    '^\s*\S+\s+(?:sending|connecting|authenticating|thinking|streaming)…\s+[0-9]',
+    '^\s*\S+\s+running\s+\S+.*\s·\s+[0-9]+(?:\.[0-9]+)?s\b',
+    '^\s*↻\s+network disconnected, waiting to retry\s+·\s+',
+    '^\s*\S+\s+Rate limited\.\s+Auto-retry in\s+',
+    '^\s*[0-9]+…\s',
+  ] },
+]
+not = [
+  { contains = ["type to filter", "Esc cancel"] },
+  { contains = ["Enter select", "Esc cancel"] },
+  { contains = ["(history search)", "Esc cancel"] },
+]
+
+[[rules]]
+id = "osc_title_idle"
+state = "idle"
+priority = 750
+region = "osc_title"
+visible_idle = true
+regex = ['\s·\slast\s~[0-9]']
+
+[[rules]]
+id = "idle_prompt"
+state = "idle"
+priority = 700
+region = "bottom_non_empty_lines(5)"
+visible_idle = true
+line_regex = ['^\s*[0-9]+(?:>|»|\$)(?:\s.*)?$']
+not = [
+  { line_regex = [
+    '^\s*\S+\s+(?:sending|connecting|authenticating|thinking|streaming)…\s+[0-9]',
+    '^\s*\S+\s+running\s+\S+.*\s·\s+[0-9]+(?:\.[0-9]+)?s\b',
+    '^\s*↻\s+network disconnected, waiting to retry\s+·\s+',
+    '^\s*\S+\s+Rate limited\.\s+Auto-retry in\s+',
+  ] },
+  { contains = ["Enter/Y confirm", "Esc/N cancel"] },
+  { contains = ["Choose Yes or No with arrows", "Esc cancels."] },
+  { contains = ["type to filter", "Esc cancel"] },
+  { contains = ["Enter select", "Esc cancel"] },
+  { contains = ["(history search)", "Esc cancel"] },
+]

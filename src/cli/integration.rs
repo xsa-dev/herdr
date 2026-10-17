@@ -59,6 +59,19 @@ fn integration_status(args: &[String]) -> std::io::Result<i32> {
         );
     }
 
+    if let Some(status) = crate::integration::experimental_jcode_integration_status() {
+        let state = describe_integration_state(
+            status.state,
+            status.installed_version,
+            status.expected_version,
+        );
+        println!(
+            "{} (experimental): {state} ({})",
+            status.label,
+            status.path.display()
+        );
+    }
+
     Ok(0)
 }
 
@@ -93,6 +106,7 @@ fn integration_install(args: &[String]) -> std::io::Result<i32> {
     let installed = match target {
         IntegrationCommandTarget::Builtin(target) => crate::integration::install_target(target),
         IntegrationCommandTarget::Letta => crate::integration::install_experimental_letta(),
+        IntegrationCommandTarget::Jcode => crate::integration::install_experimental_jcode(),
     };
     match installed {
         Ok(messages) => {
@@ -114,6 +128,7 @@ fn integration_uninstall(args: &[String]) -> std::io::Result<i32> {
     let removed = match target {
         IntegrationCommandTarget::Builtin(target) => crate::integration::uninstall_target(target),
         IntegrationCommandTarget::Letta => crate::integration::uninstall_experimental_letta(),
+        IntegrationCommandTarget::Jcode => crate::integration::uninstall_experimental_jcode(),
     };
     match removed {
         Ok(messages) => {
@@ -139,6 +154,7 @@ fn print_integration_messages(messages: Vec<String>) {
 enum IntegrationCommandTarget {
     Builtin(IntegrationTarget),
     Letta,
+    Jcode,
 }
 
 fn parse_integration_target(
@@ -147,13 +163,13 @@ fn parse_integration_target(
 ) -> std::io::Result<Option<IntegrationCommandTarget>> {
     let Some(target) = args.first().map(|arg| arg.as_str()) else {
         eprintln!(
-            "usage: herdr integration {action} <pi|omp|claude|codex|copilot|devin|droid|kimi|opencode|kilo|hermes|qodercli|qwen|letta|cursor|mastracode|grok>"
+            "usage: herdr integration {action} <pi|omp|claude|codex|copilot|devin|droid|kimi|opencode|kilo|hermes|qodercli|qwen|letta|jcode|cursor|mastracode|grok>"
         );
         return Ok(None);
     };
     if args.len() != 1 {
         eprintln!(
-            "usage: herdr integration {action} <pi|omp|claude|codex|copilot|devin|droid|kimi|opencode|kilo|hermes|qodercli|qwen|letta|cursor|mastracode|grok>"
+            "usage: herdr integration {action} <pi|omp|claude|codex|copilot|devin|droid|kimi|opencode|kilo|hermes|qodercli|qwen|letta|jcode|cursor|mastracode|grok>"
         );
         return Ok(None);
     }
@@ -173,6 +189,7 @@ fn parse_integration_target(
         "qodercli" => IntegrationCommandTarget::Builtin(IntegrationTarget::Qodercli),
         "qwen" => IntegrationCommandTarget::Builtin(IntegrationTarget::Qwen),
         "letta" => IntegrationCommandTarget::Letta,
+        "jcode" => IntegrationCommandTarget::Jcode,
         "cursor" => IntegrationCommandTarget::Builtin(IntegrationTarget::Cursor),
         "mastracode" => IntegrationCommandTarget::Builtin(IntegrationTarget::Mastracode),
         "antigravity-cli" | "antigravity_cli" => {
@@ -182,7 +199,7 @@ fn parse_integration_target(
         _ => {
             eprintln!("unknown integration target: {target}");
             eprintln!(
-                "currently supported: pi, omp, claude, codex, copilot, devin, droid, kimi, opencode, kilo, hermes, qodercli, qwen, letta, cursor, mastracode, antigravity-cli, grok"
+                "currently supported: pi, omp, claude, codex, copilot, devin, droid, kimi, opencode, kilo, hermes, qodercli, qwen, letta, jcode, cursor, mastracode, antigravity-cli, grok"
             );
             return Ok(None);
         }
@@ -207,6 +224,7 @@ fn print_integration_help() {
     eprintln!("  herdr integration install qodercli");
     eprintln!("  herdr integration install qwen");
     eprintln!("  herdr integration install letta");
+    eprintln!("  herdr integration install jcode");
     eprintln!("  herdr integration install cursor");
     eprintln!("  herdr integration install mastracode");
     eprintln!("  herdr integration install antigravity-cli");
@@ -225,6 +243,7 @@ fn print_integration_help() {
     eprintln!("  herdr integration uninstall qodercli");
     eprintln!("  herdr integration uninstall qwen");
     eprintln!("  herdr integration uninstall letta");
+    eprintln!("  herdr integration uninstall jcode");
     eprintln!("  herdr integration uninstall cursor");
     eprintln!("  herdr integration uninstall mastracode");
     eprintln!("  herdr integration uninstall antigravity-cli");

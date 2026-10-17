@@ -15,15 +15,17 @@ use super::command::shell_single_quote;
 use super::config_edit::{
     build_codex_config_with_hooks, build_kimi_config_with_hooks, ensure_command_hook,
     ensure_direct_command_hook, ensure_flat_command_hook, ensure_hermes_plugin_enabled,
-    ensure_hooks_object, ensure_simple_command_hook, hooks_object_if_present,
-    remove_direct_hook_commands, remove_flat_command_hook, remove_hermes_plugin_enabled,
-    remove_hook_commands, remove_kimi_config_block, remove_simple_command_hook,
+    ensure_hooks_object, ensure_jcode_session_hook, ensure_simple_command_hook,
+    hooks_object_if_present, remove_direct_hook_commands, remove_flat_command_hook,
+    remove_hermes_plugin_enabled, remove_hook_commands, remove_jcode_session_hook,
+    remove_kimi_config_block, remove_simple_command_hook,
 };
 use super::config_file::{check_config_targets, write_config};
 use super::env::{
     antigravity_cli_dir, claude_dir, codex_dir, copilot_dir, cursor_dir, devin_dir, droid_dir,
-    grok_dir, hermes_dir, hermes_plugin_dir, kilo_dir, kimi_dir, letta_dir, mastracode_dir,
-    omp_extension_dir, opencode_dir, opencode_state_dir, pi_extension_dir, qodercli_dir, qwen_dir,
+    grok_dir, hermes_dir, hermes_plugin_dir, jcode_dir, kilo_dir, kimi_dir, letta_dir,
+    mastracode_dir, omp_extension_dir, opencode_dir, opencode_state_dir, pi_extension_dir,
+    qodercli_dir, qwen_dir,
 };
 use super::file_ops::{
     make_executable, remove_dir_all_if_exists, remove_file_if_exists, remove_legacy_bash_hook_file,
@@ -37,11 +39,12 @@ use super::types::{
     ClaudeUninstallResult, CodexInstallPaths, CodexUninstallResult, CopilotInstallPaths,
     CopilotUninstallResult, CursorInstallPaths, CursorUninstallResult, DevinInstallPaths,
     DevinUninstallResult, DroidInstallPaths, DroidUninstallResult, GrokInstallPaths,
-    GrokUninstallResult, HermesInstallPaths, HermesUninstallResult, KiloInstallPaths,
-    KiloUninstallResult, KimiInstallPaths, KimiUninstallResult, LettaInstallPaths,
-    LettaUninstallResult, MastracodeInstallPaths, MastracodeUninstallResult, OmpInstallPaths,
-    OmpUninstallResult, OpenCodeInstallPaths, OpenCodeUninstallResult, PiUninstallResult,
-    QodercliInstallPaths, QodercliUninstallResult, QwenInstallPaths, QwenUninstallResult,
+    GrokUninstallResult, HermesInstallPaths, HermesUninstallResult, JcodeInstallPaths,
+    JcodeUninstallResult, KiloInstallPaths, KiloUninstallResult, KimiInstallPaths,
+    KimiUninstallResult, LettaInstallPaths, LettaUninstallResult, MastracodeInstallPaths,
+    MastracodeUninstallResult, OmpInstallPaths, OmpUninstallResult, OpenCodeInstallPaths,
+    OpenCodeUninstallResult, PiUninstallResult, QodercliInstallPaths, QodercliUninstallResult,
+    QwenInstallPaths, QwenUninstallResult,
 };
 use super::{
     ANTIGRAVITY_CLI_HOOK_ASSET, ANTIGRAVITY_CLI_HOOK_BLOCK_NAME, ANTIGRAVITY_CLI_HOOK_EVENTS,
@@ -53,15 +56,16 @@ use super::{
     DROID_HOOK_EVENTS, DROID_HOOK_INSTALL_NAME, DROID_REMOVED_LIFECYCLE_HOOK_EVENTS,
     GROK_HOOK_ASSET, GROK_HOOK_CONFIG_INSTALL_NAME, GROK_HOOK_INSTALL_NAME,
     HERMES_PLUGIN_INIT_ASSET, HERMES_PLUGIN_INIT_INSTALL_NAME, HERMES_PLUGIN_MANIFEST_ASSET,
-    HERMES_PLUGIN_MANIFEST_INSTALL_NAME, KILO_PLUGIN_ASSET, KILO_PLUGIN_INSTALL_NAME,
-    KIMI_HOOK_ASSET, KIMI_HOOK_INSTALL_NAME, LETTA_HOOK_ASSET, LETTA_HOOK_INSTALL_NAME,
-    LETTA_HOOK_TIMEOUT_MS, MASTRACODE_HOOK_ASSET, MASTRACODE_HOOK_EVENTS,
-    MASTRACODE_HOOK_INSTALL_NAME, MASTRACODE_HOOK_TIMEOUT_MS, MASTRACODE_REMOVED_HOOK_EVENTS,
-    OMP_EXTENSION_ASSET, OMP_EXTENSION_INSTALL_NAME, OPENCODE_PLUGIN_ASSET,
-    OPENCODE_PLUGIN_INSTALL_NAME, OPENCODE_TUI_PLUGIN_ASSET, OPENCODE_TUI_PLUGIN_INSTALL_NAME,
-    OPENCODE_TUI_PLUGIN_SPEC, PI_EXTENSION_ASSET, PI_EXTENSION_INSTALL_NAME, QODERCLI_HOOK_ASSET,
-    QODERCLI_HOOK_EVENTS, QODERCLI_HOOK_INSTALL_NAME, QODERCLI_REMOVED_LIFECYCLE_HOOK_EVENTS,
-    QWEN_HOOK_ASSET, QWEN_HOOK_EVENTS, QWEN_HOOK_INSTALL_NAME,
+    HERMES_PLUGIN_MANIFEST_INSTALL_NAME, JCODE_HOOK_ASSET, JCODE_HOOK_INSTALL_NAME,
+    KILO_PLUGIN_ASSET, KILO_PLUGIN_INSTALL_NAME, KIMI_HOOK_ASSET, KIMI_HOOK_INSTALL_NAME,
+    LETTA_HOOK_ASSET, LETTA_HOOK_INSTALL_NAME, LETTA_HOOK_TIMEOUT_MS, MASTRACODE_HOOK_ASSET,
+    MASTRACODE_HOOK_EVENTS, MASTRACODE_HOOK_INSTALL_NAME, MASTRACODE_HOOK_TIMEOUT_MS,
+    MASTRACODE_REMOVED_HOOK_EVENTS, OMP_EXTENSION_ASSET, OMP_EXTENSION_INSTALL_NAME,
+    OPENCODE_PLUGIN_ASSET, OPENCODE_PLUGIN_INSTALL_NAME, OPENCODE_TUI_PLUGIN_ASSET,
+    OPENCODE_TUI_PLUGIN_INSTALL_NAME, OPENCODE_TUI_PLUGIN_SPEC, PI_EXTENSION_ASSET,
+    PI_EXTENSION_INSTALL_NAME, QODERCLI_HOOK_ASSET, QODERCLI_HOOK_EVENTS,
+    QODERCLI_HOOK_INSTALL_NAME, QODERCLI_REMOVED_LIFECYCLE_HOOK_EVENTS, QWEN_HOOK_ASSET,
+    QWEN_HOOK_EVENTS, QWEN_HOOK_INSTALL_NAME,
 };
 
 fn ensure_extension_dir(dir: &Path, agent: &str) -> io::Result<()> {
@@ -1243,6 +1247,42 @@ pub(crate) fn install_letta() -> io::Result<LettaInstallPaths> {
     })
 }
 
+pub(crate) fn install_jcode() -> io::Result<JcodeInstallPaths> {
+    let dir = jcode_dir()?;
+    check_config_targets(&dir, &["config.toml"])?;
+    if !dir.is_dir() {
+        return Err(io::Error::other(format!(
+            "jcode config directory not found at {}. install jcode first",
+            dir.display()
+        )));
+    }
+
+    let hooks_dir = dir.join("hooks");
+    fs::create_dir_all(&hooks_dir)?;
+
+    let hook_path = hooks_dir.join(JCODE_HOOK_INSTALL_NAME);
+    let config_path = dir.join("config.toml");
+    let existing_config = if config_path.is_file() {
+        fs::read_to_string(&config_path)?
+    } else {
+        String::new()
+    };
+    let updated_config = ensure_jcode_session_hook(&existing_config, &config_path, &hook_path)?;
+
+    fs::write(&hook_path, JCODE_HOOK_ASSET)?;
+    make_executable(&hook_path)?;
+    remove_legacy_bash_hook_file(&hook_path)?;
+
+    if updated_config != existing_config {
+        write_config(&config_path, updated_config)?;
+    }
+
+    Ok(JcodeInstallPaths {
+        hook_path,
+        config_path,
+    })
+}
+
 pub(crate) fn install_cursor() -> io::Result<CursorInstallPaths> {
     let dir = cursor_dir()?;
     check_config_targets(&dir, &["hooks.json"])?;
@@ -1425,6 +1465,34 @@ pub(crate) fn uninstall_letta() -> io::Result<LettaUninstallResult> {
         settings_path,
         removed_hook_file,
         updated_settings,
+    })
+}
+
+pub(crate) fn uninstall_jcode() -> io::Result<JcodeUninstallResult> {
+    let dir = jcode_dir()?;
+    check_config_targets(&dir, &["config.toml"])?;
+    let hook_path = dir.join("hooks").join(JCODE_HOOK_INSTALL_NAME);
+    let config_path = dir.join("config.toml");
+    let mut updated_config = false;
+
+    if config_path.is_file() {
+        let existing_config = fs::read_to_string(&config_path)?;
+        let (new_config, changed) =
+            remove_jcode_session_hook(&existing_config, &config_path, &hook_path)?;
+        if changed {
+            write_config(&config_path, new_config)?;
+            updated_config = true;
+        }
+    }
+
+    let removed_hook_file =
+        remove_file_if_exists(&hook_path)? | remove_legacy_bash_hook_file(&hook_path)?;
+
+    Ok(JcodeUninstallResult {
+        hook_path,
+        config_path,
+        removed_hook_file,
+        updated_config,
     })
 }
 

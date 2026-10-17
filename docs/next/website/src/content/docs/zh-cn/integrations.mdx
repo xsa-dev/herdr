@@ -1,6 +1,6 @@
 ---
 title: 集成
-description: 为 Pi、OMP、Claude Code、Codex、GitHub Copilot CLI、Devin CLI、Droid、Kimi Code CLI、OpenCode、Kilo Code CLI、Hermes Agent、Qoder CLI、Qwen Code、Letta Code、Cursor Agent CLI、MastraCode、Antigravity CLI 和 Grok CLI 安装 Herdr 集成。
+description: 为 Pi、OMP、Claude Code、Codex、GitHub Copilot CLI、Devin CLI、Droid、Kimi Code CLI、OpenCode、Kilo Code CLI、Hermes Agent、Qoder CLI、Qwen Code、Letta Code、Jcode、Cursor Agent CLI、MastraCode、Antigravity CLI 和 Grok CLI 安装 Herdr 集成。
 ---
 
 Herdr 会自动检测它支持的智能体。安装智能体的集成后,Herdr 可以在服务器重启后恢复同一个会话。部分集成还会直接上报智能体的状态。哪些智能体由 Herdr 支持、哪些智能体自己支持 Herdr,见[智能体](/zh-cn/docs/agents/)。
@@ -27,6 +27,7 @@ herdr integration install mastracode
 herdr integration install qodercli
 herdr integration install qwen
 herdr integration install letta
+herdr integration install jcode
 herdr integration install cursor
 herdr integration install antigravity-cli
 herdr integration install grok
@@ -50,6 +51,7 @@ herdr integration uninstall mastracode
 herdr integration uninstall qodercli
 herdr integration uninstall qwen
 herdr integration uninstall letta
+herdr integration uninstall jcode
 herdr integration uninstall cursor
 herdr integration uninstall antigravity-cli
 herdr integration uninstall grok
@@ -63,7 +65,7 @@ Herdr 对 Linux/macOS 上的集成配置和所有平台的新文件使用原子�
 
 Pi、OMP、Kimi Code CLI、OpenCode、Kilo Code CLI 和 MastraCode 的集成还会上报智能体的状态。在它们上报期间,Herdr 使用这些上报,而不是读取屏幕。其他集成则把状态交给屏幕检测。
 
-原生会话恢复需要最新的 Herdr 集成: Pi 集成版本 `2`、OMP 版本 `3`、Claude Code 版本 `6`、Codex 版本 `5`、GitHub Copilot CLI 版本 `2`、Devin CLI 版本 `2`、Droid 版本 `2`、Kimi Code CLI 版本 `3`、Qoder CLI 版本 `2`、Qwen Code 版本 `1`、Letta Code 版本 `1`、Cursor Agent CLI 版本 `1`、Grok CLI 版本 `2`、OpenCode 版本 `5`、Kilo Code CLI 版本 `1`、Hermes Agent 版本 `5`、MastraCode 版本 `1`、Antigravity CLI 版本 `1`。用 `herdr integration status` 查看已安装版本。
+原生会话恢复需要最新的 Herdr 集成: Pi 集成版本 `2`、OMP 版本 `3`、Claude Code 版本 `6`、Codex 版本 `5`、GitHub Copilot CLI 版本 `2`、Devin CLI 版本 `2`、Droid 版本 `2`、Kimi Code CLI 版本 `3`、Qoder CLI 版本 `2`、Qwen Code 版本 `1`、Letta Code 版本 `1`、Jcode 版本 `1`、Cursor Agent CLI 版本 `1`、Grok CLI 版本 `2`、OpenCode 版本 `5`、Kilo Code CLI 版本 `1`、Hermes Agent 版本 `5`、MastraCode 版本 `1`、Antigravity CLI 版本 `1`。用 `herdr integration status` 查看已安装版本。
 
 ## 集成你自己的智能体
 
@@ -274,6 +276,22 @@ herdr integration install letta
 Herdr 使用 `~/.letta`。配置目录必须已经存在。安装会写入 `hooks/herdr-agent-session.sh`（Windows 上为 `hooks/herdr-agent-session.ps1`）,并向 `settings.json` 添加 Herdr 条目。卸载只移除匹配条目和托管脚本。
 
 Herdr 用 `letta --conversation <id>` 恢复命名会话。它把默认会话记录为 `default:<agent-id>`,并用 `letta --conversation default --agent <agent-id>` 恢复该会话。
+
+## Jcode
+
+Jcode 集成安装是实验性的 CLI 专用功能，不在 Settings 的集成列表或 JSON 集成 API 中提供。`herdr integration status` 将其显示为 `jcode (experimental)`。智能体检测和 `herdr agent start --kind jcode` 不受此安装方式限制，均已支持，且在 `HERDR_ENV=1` 时 Jcode TUI 也会原生上报状态和恢复命令。
+
+安装 Jcode 钩子:
+
+```bash
+herdr integration install jcode
+```
+
+`session_start` 钩子会上报 Jcode 会话 ID，用于原生恢复。当 Jcode TUI 未直接上报状态时，状态来自 Herdr 的屏幕清单检测。
+
+Herdr 默认使用 `~/.jcode`，设置了 `JCODE_HOME` 时使用后者。配置目录必须已经存在。安装会写入 `hooks/herdr-agent-session.sh`（Windows 上为 `hooks/herdr-agent-session.ps1`），并向 `config.toml` 的 `[hooks] session_start` 添加 Herdr 条目。卸载只移除匹配条目和托管脚本。
+
+Herdr 用 `jcode --resume <id>` 恢复保存的 Jcode 会话。
 
 ## Cursor Agent CLI
 

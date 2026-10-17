@@ -139,15 +139,22 @@ pub fn persisted_session_from_launch_args(
     let [command, session_id] = args else {
         return None;
     };
-    if agent != crate::detect::Agent::Codex || command != "resume" || session_id.starts_with('-') {
+    if session_id.starts_with('-') {
         return None;
     }
-
-    Some(PersistedAgentSession {
-        source: "herdr:codex".into(),
-        agent: "codex".into(),
-        session_ref: AgentSessionRef::id(session_id.clone())?,
-    })
+    match (agent, command.as_str()) {
+        (crate::detect::Agent::Codex, "resume") => Some(PersistedAgentSession {
+            source: "herdr:codex".into(),
+            agent: "codex".into(),
+            session_ref: AgentSessionRef::id(session_id.clone())?,
+        }),
+        (crate::detect::Agent::Jcode, "--resume") => Some(PersistedAgentSession {
+            source: "herdr:jcode".into(),
+            agent: "jcode".into(),
+            session_ref: AgentSessionRef::id(session_id.clone())?,
+        }),
+        _ => None,
+    }
 }
 
 pub fn normalize_session_start_source(value: Option<String>) -> Option<String> {
@@ -308,6 +315,9 @@ pub fn plan(source: &str, agent: &str, session_ref: &AgentSessionRef) -> Option<
                 ]
             }
         }
+        ("herdr:jcode", "jcode", AgentSessionRefKind::Id) => {
+            vec!["jcode".into(), "--resume".into(), session_ref.value.clone()]
+        }
         _ => return None,
     };
 
@@ -346,6 +356,7 @@ pub(crate) fn is_official_agent_source(source: &str, agent: &str) -> bool {
             | ("herdr:antigravity_cli", "agy")
             | ("herdr:grok", "grok")
             | ("herdr:letta", "letta")
+            | ("herdr:jcode", "jcode")
     )
 }
 
@@ -658,6 +669,16 @@ mod tests {
             &AgentSessionRef::id("default:").unwrap()
         )
         .is_none());
+        assert_eq!(
+            plan(
+                "herdr:jcode",
+                "jcode",
+                &AgentSessionRef::id("session_fox_123").unwrap()
+            )
+            .unwrap()
+            .argv,
+            vec!["jcode", "--resume", "session_fox_123"]
+        );
     }
 
     #[test]

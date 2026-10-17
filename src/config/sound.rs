@@ -45,6 +45,7 @@ pub struct AgentSoundOverrides {
     pub qodercli: AgentSoundSetting,
     pub qwen: AgentSoundSetting,
     pub letta: AgentSoundSetting,
+    pub jcode: AgentSoundSetting,
     pub maki: AgentSoundSetting,
     pub muse: AgentSoundSetting,
 }
@@ -144,6 +145,7 @@ impl AgentSoundOverrides {
             Some(Agent::Qodercli) => self.qodercli,
             Some(Agent::Qwen) => self.qwen,
             Some(Agent::Letta) => self.letta,
+            Some(Agent::Jcode) => self.jcode,
             Some(Agent::Maki) => self.maki,
             Some(Agent::Muse) => self.muse,
             None => AgentSoundSetting::Default,
@@ -186,6 +188,7 @@ impl Default for AgentSoundOverrides {
             qodercli: AgentSoundSetting::Default,
             qwen: AgentSoundSetting::Default,
             letta: AgentSoundSetting::Default,
+            jcode: AgentSoundSetting::Default,
             maki: AgentSoundSetting::Default,
             muse: AgentSoundSetting::Default,
         }
@@ -227,6 +230,17 @@ claude = "on"
         assert_eq!(config.ui.sound.agents.claude, AgentSoundSetting::On);
         assert_eq!(config.ui.sound.agents.pi, AgentSoundSetting::Default);
         assert_eq!(config.ui.sound.agents.letta, AgentSoundSetting::Default);
+        assert_eq!(config.ui.sound.agents.jcode, AgentSoundSetting::Default);
+    }
+
+    #[test]
+    fn jcode_sound_override_is_used() {
+        let overrides: AgentSoundOverrides = toml::from_str("jcode = \"on\"").unwrap();
+        assert_eq!(overrides.jcode, AgentSoundSetting::On);
+        assert_eq!(
+            overrides.for_agent(Some(Agent::Jcode)),
+            AgentSoundSetting::On
+        );
     }
 
     #[test]

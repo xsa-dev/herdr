@@ -17,6 +17,7 @@ pub(crate) const KIMI_CODE_HOME_ENV_VAR: &str = "KIMI_CODE_HOME";
 pub(crate) const COPILOT_HOME_ENV_VAR: &str = "COPILOT_HOME";
 pub(crate) const QODERCLI_CONFIG_DIR_ENV_VAR: &str = "QODER_CONFIG_DIR";
 pub(crate) const QWEN_HOME_ENV_VAR: &str = "QWEN_HOME";
+pub(crate) const JCODE_HOME_ENV_VAR: &str = "JCODE_HOME";
 pub(crate) const CURSOR_CONFIG_DIR_ENV_VAR: &str = "CURSOR_CONFIG_DIR";
 pub(crate) const ANTIGRAVITY_CLI_CONFIG_DIR_ENV_VAR: &str = "ANTIGRAVITY_CLI_CONFIG_DIR";
 pub(crate) const GROK_CONFIG_DIR_ENV_VAR: &str = "GROK_CONFIG_DIR";
@@ -177,6 +178,10 @@ pub(crate) fn qwen_dir() -> io::Result<PathBuf> {
 
 pub(crate) fn letta_dir() -> io::Result<PathBuf> {
     Ok(home_dir()?.join(".letta"))
+}
+
+pub(crate) fn jcode_dir() -> io::Result<PathBuf> {
+    config_dir_from_env_or_home(JCODE_HOME_ENV_VAR, &[".jcode"])
 }
 
 pub(crate) fn cursor_dir() -> io::Result<PathBuf> {

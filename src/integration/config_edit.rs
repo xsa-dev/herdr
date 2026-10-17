@@ -3,6 +3,8 @@ use std::path::Path;
 
 use serde_json::{json, Map, Value};
 
+#[cfg(windows)]
+use super::command::powershell_encoded_hook_command;
 use super::command::{hook_command, legacy_bash_hook_command};
 #[cfg(windows)]
 use super::file_ops::legacy_bash_hook_path;
@@ -981,4 +983,276 @@ pub(crate) fn is_toml_key(line: &str, key: &str) -> bool {
     }
 
     trimmed[key.len()..].trim_start().starts_with('=')
+}
+
+pub(crate) fn jcode_hook_command(hook_path: &Path) -> String {
+    #[cfg(windows)]
+    {
+        powershell_encoded_hook_command(hook_path, "session")
+    }
+    #[cfg(not(windows))]
+    {
+        hook_command(hook_path, Some("session"))
+    }
+}
+
+pub(crate) fn jcode_hook_command_variants(hook_path: &Path) -> Vec<String> {
+    let mut commands = vec![jcode_hook_command(hook_path)];
+    for variant in hook_command_variants(hook_path, Some("session")) {
+        push_unique_command(&mut commands, variant);
+    }
+    #[cfg(windows)]
+    {
+        push_unique_command(
+            &mut commands,
+            powershell_encoded_hook_command(hook_path, "session"),
+        );
+        push_unique_command(
+            &mut commands,
+            powershell_encoded_hook_command(&legacy_bash_hook_path(hook_path), "session"),
+        );
+    }
+    commands
+}
+
+fn parse_jcode_session_start_commands(
+    content: &str,
+    config_path: &Path,
+) -> io::Result<(Vec<String>, bool)> {
+    if content.trim().is_empty() {
+        return Ok((Vec::new(), false));
+    }
+    let parsed: toml::Value = toml::from_str(content).map_err(|err| {
+        io::Error::other(format!("failed to parse {}: {err}", config_path.display()))
+    })?;
+    let Some(root) = parsed.as_table() else {
+        return Err(io::Error::other(format!(
+            "jcode config at {} must be a TOML table",
+            config_path.display()
+        )));
+    };
+    let Some(hooks_value) = root.get("hooks") else {
+        return Ok((Vec::new(), false));
+    };
+    let Some(hooks) = hooks_value.as_table() else {
+        return Err(io::Error::other(format!(
+            "jcode hooks section at {} must be a TOML table",
+            config_path.display()
+        )));
+    };
+    let Some(session_start) = hooks.get("session_start") else {
+        return Ok((Vec::new(), false));
+    };
+    match session_start {
+        toml::Value::String(command) => {
+            let trimmed = command.trim();
+            if trimmed.is_empty() {
+                Ok((Vec::new(), true))
+            } else {
+                Ok((vec![trimmed.to_string()], true))
+            }
+        }
+        toml::Value::Array(items) => {
+            let mut commands = Vec::with_capacity(items.len());
+            for item in items {
+                let Some(command) = item.as_str() else {
+                    return Err(io::Error::other(format!(
+                        "jcode hooks.session_start entries at {} must be strings",
+                        config_path.display()
+                    )));
+                };
+                let trimmed = command.trim();
+                if !trimmed.is_empty() {
+                    commands.push(trimmed.to_string());
+                }
+            }
+            Ok((commands, false))
+        }
+        _ => Err(io::Error::other(format!(
+            "jcode hooks.session_start at {} must be a string or array of strings",
+            config_path.display()
+        ))),
+    }
+}
+
+fn find_toml_table_range(lines: &[String], table_header: &str) -> Option<(usize, usize)> {
+    let mut header_index = None;
+    for (index, line) in lines.iter().enumerate() {
+        if let Some(header) = toml_table_header(line) {
+            if header_index.is_some() {
+                return header_index.map(|start| (start, index));
+            }
+            if header == table_header {
+                header_index = Some(index);
+            }
+        }
+    }
+    header_index.map(|start| (start, lines.len()))
+}
+
+fn find_toml_key_span_in_range(
+    lines: &[String],
+    range_start: usize,
+    range_end: usize,
+    key: &str,
+) -> Option<(usize, usize)> {
+    let key_index = (range_start..range_end).find(|&index| is_toml_key(&lines[index], key))?;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut quote_char = '\0';
+    let mut escaped = false;
+    let mut saw_equals = false;
+
+    for (index, line) in lines.iter().enumerate().take(range_end).skip(key_index) {
+        for ch in line.chars() {
+            if in_string {
+                if quote_char == '"' && ch == '\\' && !escaped {
+                    escaped = true;
+                    continue;
+                }
+                if ch == quote_char && !escaped {
+                    in_string = false;
+                }
+                escaped = false;
+                continue;
+            }
+            match ch {
+                '=' if !saw_equals => saw_equals = true,
+                '"' | '\'' if saw_equals => {
+                    in_string = true;
+                    quote_char = ch;
+                }
+                '#' if saw_equals => break,
+                '[' if saw_equals => depth += 1,
+                ']' if saw_equals && depth > 0 => depth -= 1,
+                _ => {}
+            }
+        }
+        if saw_equals && depth == 0 && !in_string {
+            return Some((key_index, index + 1));
+        }
+    }
+    Some((key_index, key_index + 1))
+}
+
+pub(crate) fn jcode_session_hook_is_configured(content: &str, hook_path: &Path) -> bool {
+    let dummy_path = Path::new("config.toml");
+    let Ok((commands, _)) = parse_jcode_session_start_commands(content, dummy_path) else {
+        return false;
+    };
+    let desired = jcode_hook_command(hook_path);
+    commands.iter().any(|cmd| cmd == &desired)
+}
+
+pub(crate) fn ensure_jcode_session_hook(
+    content: &str,
+    config_path: &Path,
+    hook_path: &Path,
+) -> io::Result<String> {
+    let (existing_commands, _) = parse_jcode_session_start_commands(content, config_path)?;
+    let desired = jcode_hook_command(hook_path);
+    let variants = jcode_hook_command_variants(hook_path);
+
+    let has_desired = existing_commands.iter().any(|cmd| cmd == &desired);
+    let has_stale_variant = existing_commands
+        .iter()
+        .any(|cmd| cmd != &desired && variants.contains(cmd));
+    if has_desired && !has_stale_variant {
+        return Ok(content.to_string());
+    }
+
+    let mut updated_commands: Vec<String> = existing_commands
+        .into_iter()
+        .filter(|cmd| !variants.contains(cmd))
+        .collect();
+    updated_commands.push(desired);
+
+    let formatted_items = updated_commands
+        .iter()
+        .map(|cmd| toml_basic_string(cmd))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let assignment = format!("session_start = [{formatted_items}]");
+
+    let trailing_newline = content.ends_with('\n');
+    let mut lines: Vec<String> = content.lines().map(str::to_string).collect();
+    if let Some((hooks_start, hooks_end)) = find_toml_table_range(&lines, "[hooks]") {
+        if let Some((key_start, key_end)) =
+            find_toml_key_span_in_range(&lines, hooks_start + 1, hooks_end, "session_start")
+        {
+            lines.splice(key_start..key_end, [assignment]);
+        } else {
+            lines.insert(hooks_start + 1, assignment);
+        }
+        return Ok(join_toml_lines(lines, trailing_newline));
+    }
+
+    let mut result = content.trim_end_matches('\n').to_string();
+    if !result.is_empty() {
+        result.push('\n');
+        result.push('\n');
+    }
+    result.push_str("[hooks]\n");
+    result.push_str(&assignment);
+    result.push('\n');
+    Ok(result)
+}
+
+pub(crate) fn remove_jcode_session_hook(
+    content: &str,
+    config_path: &Path,
+    hook_path: &Path,
+) -> io::Result<(String, bool)> {
+    let (existing_commands, _) = parse_jcode_session_start_commands(content, config_path)?;
+    let variants = jcode_hook_command_variants(hook_path);
+    let remaining: Vec<String> = existing_commands
+        .iter()
+        .filter(|cmd| !variants.contains(*cmd))
+        .cloned()
+        .collect();
+    if remaining.len() == existing_commands.len() {
+        return Ok((content.to_string(), false));
+    }
+
+    let trailing_newline = content.ends_with('\n');
+    let mut lines: Vec<String> = content.lines().map(str::to_string).collect();
+    let Some((hooks_start, hooks_end)) = find_toml_table_range(&lines, "[hooks]") else {
+        return Ok((content.to_string(), false));
+    };
+    let Some((key_start, key_end)) =
+        find_toml_key_span_in_range(&lines, hooks_start + 1, hooks_end, "session_start")
+    else {
+        return Ok((content.to_string(), false));
+    };
+
+    if remaining.is_empty() {
+        lines.drain(key_start..key_end);
+        let new_hooks_end = hooks_end - (key_end - key_start);
+        let section_empty = lines[hooks_start + 1..new_hooks_end]
+            .iter()
+            .all(|line| line.trim().is_empty());
+        if section_empty {
+            lines.drain(hooks_start..new_hooks_end);
+            while lines.last().is_some_and(|line| line.trim().is_empty()) {
+                lines.pop();
+            }
+        }
+        if lines.is_empty() {
+            return Ok((String::new(), true));
+        }
+        return Ok((join_toml_lines(lines, trailing_newline), true));
+    }
+
+    let assignment = if let [single] = remaining.as_slice() {
+        format!("session_start = {}", toml_basic_string(single))
+    } else {
+        let formatted_items = remaining
+            .iter()
+            .map(|cmd| toml_basic_string(cmd))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("session_start = [{formatted_items}]")
+    };
+    lines.splice(key_start..key_end, [assignment]);
+    Ok((join_toml_lines(lines, trailing_newline), true))
 }

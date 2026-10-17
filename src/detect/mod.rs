@@ -63,12 +63,13 @@ pub enum Agent {
     Qodercli,
     Qwen,
     Letta,
+    Jcode,
     Maki,
     Muse,
 }
 
 impl Agent {
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 25] = [
         Self::Pi,
         Self::Claude,
         Self::Codex,
@@ -91,11 +92,12 @@ impl Agent {
         Self::Qodercli,
         Self::Qwen,
         Self::Letta,
+        Self::Jcode,
         Self::Maki,
         Self::Muse,
     ];
 
-    pub const SCREEN_MANIFEST_AGENTS: [Self; 22] = [
+    pub const SCREEN_MANIFEST_AGENTS: [Self; 23] = [
         Self::Pi,
         Self::Claude,
         Self::Codex,
@@ -116,6 +118,7 @@ impl Agent {
         Self::Qodercli,
         Self::Qwen,
         Self::Letta,
+        Self::Jcode,
         Self::Maki,
         Self::Muse,
     ];
@@ -145,6 +148,7 @@ pub fn agent_label(agent: Agent) -> &'static str {
         Agent::Qodercli => "qodercli",
         Agent::Qwen => "qwen",
         Agent::Letta => "letta",
+        Agent::Jcode => "jcode",
         Agent::Maki => "maki",
         Agent::Muse => "muse",
     }
@@ -180,6 +184,7 @@ pub fn interactive_agent_executable(agent: Agent) -> &'static str {
         Agent::Qodercli => "qodercli",
         Agent::Qwen => "qwen",
         Agent::Letta => "letta",
+        Agent::Jcode => "jcode",
         Agent::Maki => "maki",
         Agent::Muse => "muse",
     }
@@ -220,11 +225,24 @@ fn lookup_agent(name: &str) -> Option<Agent> {
         "qodercli" | "qoderclicn" | "qoder" | "qodercn" => Some(Agent::Qodercli),
         "qwen" | "qwen-code" | "qwen code" => Some(Agent::Qwen),
         "letta" | "letta-code" | "letta code" => Some(Agent::Letta),
+        "jcode" | "jcode-tui" | "jcode:client" | "jcode:selfdev" => Some(Agent::Jcode),
         "maki" => Some(Agent::Maki),
         "muse" | "muse-code" | "muse-cli" => Some(Agent::Muse),
+        _ if is_jcode_client_process_title(name) => Some(Agent::Jcode),
         _ if is_muse_versioned_binary(name) => Some(Agent::Muse),
         _ => None,
     }
+}
+
+/// Jcode rewrites its client process title to `jcode:client`, `jcode:selfdev`,
+/// `jcode:c:<session>`, or `jcode:d:<session>`, while background servers use
+/// `jcode:server` or `jcode:s:<server>`. Match only the interactive client
+/// titles so background daemon processes are never mistaken for a pane agent.
+fn is_jcode_client_process_title(name: &str) -> bool {
+    let name = path_basename(name);
+    name.strip_prefix("jcode:c:")
+        .or_else(|| name.strip_prefix("jcode:d:"))
+        .is_some_and(|rest| !rest.is_empty())
 }
 
 /// Muse's install-dir launcher script resolves the active release and execs
@@ -261,7 +279,7 @@ pub fn identify_agent_process_in_job(
     {
         let candidate = normalized_process_name(process);
         if let Some(agent) = identify_agent(&candidate) {
-            if agent != Agent::Letta || is_interactive_letta_process(process) {
+            if is_interactive_agent_process(agent, process) {
                 return Some((agent, candidate, process.pid));
             }
         }
@@ -274,7 +292,7 @@ pub fn identify_agent_process_in_job(
         let Some(agent) = identify_agent(&candidate) else {
             continue;
         };
-        if agent == Agent::Letta && !is_interactive_letta_process(process) {
+        if !is_interactive_agent_process(agent, process) {
             continue;
         }
         let score = process_priority(process, &candidate);
@@ -345,6 +363,7 @@ pub(crate) fn session_identity_only_integration(source: &str, agent_label: &str)
         ("herdr:hermes", "hermes")
             | ("herdr:qwen", "qwen")
             | ("herdr:letta", "letta")
+            | ("herdr:jcode", "jcode")
             | ("herdr:antigravity_cli", "agy")
     )
 }
@@ -859,6 +878,128 @@ fn is_interactive_letta_process(process: &crate::platform::ForegroundProcess) ->
     letta_first_arg_after_backend_selection(cli_args).is_none_or(|arg| arg.starts_with('-'))
 }
 
+fn is_interactive_agent_process(
+    agent: Agent,
+    process: &crate::platform::ForegroundProcess,
+) -> bool {
+    match agent {
+        Agent::Letta => is_interactive_letta_process(process),
+        Agent::Jcode => is_interactive_jcode_process(process),
+        _ => true,
+    }
+}
+
+fn is_interactive_jcode_process(process: &crate::platform::ForegroundProcess) -> bool {
+    for raw_title in [process.argv0.as_deref(), Some(process.name.as_str())]
+        .into_iter()
+        .flatten()
+    {
+        let base = path_basename(raw_title.trim());
+        if matches!(base, "jcode:client" | "jcode:selfdev") || is_jcode_client_process_title(base) {
+            return true;
+        }
+        if base == "jcode:server" || base.starts_with("jcode:s:") {
+            return false;
+        }
+    }
+
+    let parsed_cmdline;
+    let argv = if let Some(argv) = process.argv.as_deref() {
+        argv
+    } else {
+        parsed_cmdline = process
+            .cmdline
+            .as_deref()
+            .unwrap_or_default()
+            .split_whitespace()
+            .map(|arg| arg.trim_matches(|ch| matches!(ch, '\'' | '"')).to_string())
+            .collect::<Vec<_>>();
+        if parsed_cmdline.is_empty() {
+            return true;
+        }
+        &parsed_cmdline
+    };
+
+    let Some(first) = argv.first() else {
+        return true;
+    };
+    let first_base = path_basename(first.trim());
+    if matches!(first_base, "jcode:client" | "jcode:selfdev")
+        || is_jcode_client_process_title(first_base)
+    {
+        return true;
+    }
+    if first_base == "jcode:server" || first_base.starts_with("jcode:s:") {
+        return false;
+    }
+
+    let cli_args = &argv[1..];
+    if cli_args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "-h" | "--help" | "-V" | "--version"))
+    {
+        return false;
+    }
+
+    let mut index = 0;
+    let mut subcommand: Option<&str> = None;
+    while let Some(arg) = cli_args.get(index) {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--resume" || arg == "-r" {
+            if let Some(next) = cli_args.get(index + 1) {
+                if !next.starts_with('-')
+                    && !matches!(next.as_str(), "self-dev" | "connect" | "repl" | "replay")
+                {
+                    index += 2;
+                    continue;
+                }
+            }
+            index += 1;
+            continue;
+        }
+        if matches!(
+            arg.as_str(),
+            "-p" | "--provider"
+                | "-C"
+                | "--cwd"
+                | "--remote-working-dir"
+                | "--ssh"
+                | "--ssh-binary"
+                | "--ssh-server-socket"
+                | "--spawn-hotkey"
+                | "--socket"
+                | "-m"
+                | "--model"
+                | "--provider-profile"
+                | "--tool-profile"
+                | "--tools"
+                | "--disabled-tools"
+                | "--mcp-tools"
+                | "--mcp-tools-token-threshold"
+        ) {
+            index += 2;
+            continue;
+        }
+        if arg.starts_with('-') {
+            index += 1;
+            continue;
+        }
+        subcommand = Some(arg.as_str());
+        break;
+    }
+
+    match subcommand {
+        None | Some("connect" | "repl" | "replay") => true,
+        Some("self-dev") => !cli_args[index + 1..].iter().any(|arg| {
+            let option = arg.split_once('=').map_or(arg.as_str(), |(name, _)| name);
+            matches!(option, "--build" | "--promote" | "--status")
+        }),
+        Some(_) => false,
+    }
+}
+
 fn resolved_agent_name_from_path_token(token: &str) -> Option<String> {
     let path = std::path::Path::new(token);
     if path.components().count() < 2 {
@@ -1005,6 +1146,14 @@ mod tests {
         assert_eq!(identify_agent("Qwen Code"), Some(Agent::Qwen));
         assert_eq!(identify_agent("letta"), Some(Agent::Letta));
         assert_eq!(identify_agent("Letta Code"), Some(Agent::Letta));
+        assert_eq!(identify_agent("jcode"), Some(Agent::Jcode));
+        assert_eq!(identify_agent("jcode-tui"), Some(Agent::Jcode));
+        assert_eq!(identify_agent("jcode:client"), Some(Agent::Jcode));
+        assert_eq!(identify_agent("jcode:selfdev"), Some(Agent::Jcode));
+        assert_eq!(identify_agent("jcode:c:fox"), Some(Agent::Jcode));
+        assert_eq!(identify_agent("jcode:d:fox"), Some(Agent::Jcode));
+        assert_eq!(identify_agent("jcode:server"), None);
+        assert_eq!(identify_agent("jcode:s:main"), None);
         assert_eq!(identify_agent("maki"), Some(Agent::Maki));
         assert_eq!(identify_agent("muse"), Some(Agent::Muse));
         assert_eq!(identify_agent("muse-code"), Some(Agent::Muse));
@@ -1045,6 +1194,8 @@ mod tests {
         assert_eq!(parse_agent_label("hermes-agent"), Some(Agent::Hermes));
         assert_eq!(parse_agent_label("qwen-code"), Some(Agent::Qwen));
         assert_eq!(parse_agent_label("letta-code"), Some(Agent::Letta));
+        assert_eq!(parse_agent_label("jcode"), Some(Agent::Jcode));
+        assert_eq!(parse_agent_label("jcode:c:fox"), Some(Agent::Jcode));
         assert_eq!(parse_agent_label("maki"), Some(Agent::Maki));
         assert_eq!(parse_agent_label("kilo-code"), Some(Agent::Kilo));
     }
@@ -1090,6 +1241,7 @@ mod tests {
             (Agent::Qodercli, "qodercli"),
             (Agent::Qwen, "qwen"),
             (Agent::Letta, "letta"),
+            (Agent::Jcode, "jcode"),
             (Agent::Maki, "maki"),
             (Agent::Muse, "muse"),
         ];
@@ -1122,6 +1274,7 @@ mod tests {
             ("herdr:hermes", "hermes", Agent::Hermes),
             ("herdr:qwen", "qwen", Agent::Qwen),
             ("herdr:letta", "letta", Agent::Letta),
+            ("herdr:jcode", "jcode", Agent::Jcode),
             ("herdr:antigravity_cli", "agy", Agent::Antigravity),
         ] {
             assert!(!full_lifecycle_hook_authority(source, label));
@@ -1341,6 +1494,56 @@ mod tests {
             )],
         };
         assert_eq!(identify_agent_in_job(&source_checkout), None);
+    }
+
+    #[test]
+    fn identify_agent_in_job_detects_interactive_jcode_and_ignores_daemon_or_cli_subcommands() {
+        for (name, argv) in [
+            ("jcode", vec!["jcode"]),
+            ("jcode", vec!["jcode", "--resume", "session_fox_123"]),
+            (
+                "jcode",
+                vec!["jcode", "--resume", "session_fox_123", "self-dev"],
+            ),
+            ("jcode", vec!["jcode", "self-dev"]),
+            (
+                "jcode",
+                vec!["jcode", "--ssh", "devbox", "--resume", "session_fox_123"],
+            ),
+            ("jcode", vec!["jcode:c:fox"]),
+            ("jcode", vec!["jcode:selfdev"]),
+        ] {
+            let job = crate::platform::ForegroundJob {
+                process_group_id: 123,
+                processes: vec![foreground_process(123, name, &argv)],
+            };
+            assert_eq!(
+                identify_agent_in_job(&job).map(|(agent, _)| agent),
+                Some(Agent::Jcode),
+                "argv: {argv:?}"
+            );
+        }
+
+        for argv in [
+            vec!["jcode", "serve"],
+            vec!["jcode", "serve", "--temporary-server"],
+            vec!["jcode", "server", "stop"],
+            vec!["jcode", "run", "fix typo"],
+            vec!["jcode", "version"],
+            vec!["jcode", "--version"],
+            vec!["jcode", "--help"],
+            vec!["jcode", "login"],
+            vec!["jcode", "usage"],
+            vec!["jcode", "self-dev", "--build"],
+            vec!["jcode:server"],
+            vec!["jcode:s:main"],
+        ] {
+            let job = crate::platform::ForegroundJob {
+                process_group_id: 123,
+                processes: vec![foreground_process(123, "jcode", &argv)],
+            };
+            assert_eq!(identify_agent_in_job(&job), None, "argv: {argv:?}");
+        }
     }
 
     #[test]

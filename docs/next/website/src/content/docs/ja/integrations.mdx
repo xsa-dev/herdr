@@ -1,6 +1,6 @@
 ---
 title: インテグレーション
-description: Pi、OMP、Claude Code、Codex、GitHub Copilot CLI、Devin CLI、Droid、Kimi Code CLI、OpenCode、Kilo Code CLI、Hermes Agent、Qoder CLI、Qwen Code、Letta Code、Cursor Agent CLI、MastraCode、Antigravity CLI、Grok CLI 向けの Herdr インテグレーションをインストールします。
+description: Pi、OMP、Claude Code、Codex、GitHub Copilot CLI、Devin CLI、Droid、Kimi Code CLI、OpenCode、Kilo Code CLI、Hermes Agent、Qoder CLI、Qwen Code、Letta Code、Jcode、Cursor Agent CLI、MastraCode、Antigravity CLI、Grok CLI 向けの Herdr インテグレーションをインストールします。
 ---
 
 Herdr は対応するエージェントを自動的に検出します。エージェントのインテグレーションをインストールすると、サーバーの再起動後に Herdr が同じセッションを resume できます。一部のインテグレーションはエージェントの状態も直接報告します。Herdr が対応するエージェントと、自ら Herdr に対応するエージェントについては[エージェント](/ja/docs/agents/)を参照してください。
@@ -27,6 +27,7 @@ herdr integration install mastracode
 herdr integration install qodercli
 herdr integration install qwen
 herdr integration install letta
+herdr integration install jcode
 herdr integration install cursor
 herdr integration install antigravity-cli
 herdr integration install grok
@@ -50,6 +51,7 @@ herdr integration uninstall mastracode
 herdr integration uninstall qodercli
 herdr integration uninstall qwen
 herdr integration uninstall letta
+herdr integration uninstall jcode
 herdr integration uninstall cursor
 herdr integration uninstall antigravity-cli
 herdr integration uninstall grok
@@ -63,7 +65,7 @@ Herdr は Linux/macOS の統合設定と全プラットフォームの新規フ�
 
 Pi、OMP、Kimi Code CLI、OpenCode、Kilo Code CLI、MastraCode のインテグレーションは、エージェントの状態も報告します。報告している間、Herdr は画面を読む代わりにその報告を使います。その他のインテグレーションでは、状態は画面検出に任せます。
 
-エージェントネイティブのセッション復元には最新の Herdr インテグレーションが必要です: Pi インテグレーションはバージョン `2`、OMP は `3`、Claude Code は `6`、Codex は `5`、GitHub Copilot CLI は `2`、Devin CLI は `2`、Droid は `2`、Kimi Code CLI は `3`、Qoder CLI は `2`、Qwen Code は `1`、Letta Code は `1`、Cursor Agent CLI は `1`、Grok CLI は `2`、OpenCode は `5`、Kilo Code CLI は `1`、Hermes Agent は `5`、MastraCode は `1`、Antigravity CLI は `1` です。インストール済みバージョンは `herdr integration status` で確認してください。
+エージェントネイティブのセッション復元には最新の Herdr インテグレーションが必要です: Pi インテグレーションはバージョン `2`、OMP は `3`、Claude Code は `6`、Codex は `5`、GitHub Copilot CLI は `2`、Devin CLI は `2`、Droid は `2`、Kimi Code CLI は `3`、Qoder CLI は `2`、Qwen Code は `1`、Letta Code は `1`、Jcode は `1`、Cursor Agent CLI は `1`、Grok CLI は `2`、OpenCode は `5`、Kilo Code CLI は `1`、Hermes Agent は `5`、MastraCode は `1`、Antigravity CLI は `1` です。インストール済みバージョンは `herdr integration status` で確認してください。
 
 ## 独自エージェントを統合する
 
@@ -274,6 +276,22 @@ herdr integration install letta
 Herdr は `~/.letta` を使います。設定ディレクトリはあらかじめ存在している必要があります。インストールは `hooks/herdr-agent-session.sh`（Windows では `hooks/herdr-agent-session.ps1`）を書き込み、`settings.json` に Herdr エントリを追加します。アンインストールは一致するエントリと管理対象スクリプトだけを削除します。
 
 Herdr は名前付き会話を `letta --conversation <id>` で resume します。デフォルト会話は `default:<agent-id>` として記録し、`letta --conversation default --agent <agent-id>` で resume します。
+
+## Jcode
+
+Jcode インテグレーションのインストールは実験的な CLI 専用機能です。Settings のインテグレーション一覧や JSON インテグレーション API には含まれません。`herdr integration status` では `jcode (experimental)` と表示されます。エージェント検出と `herdr agent start --kind jcode` はこのインストール方法の制限とは別にサポートされており、`HERDR_ENV=1` のとき Jcode TUI は状態と resume コマンドもネイティブに報告します。
+
+Jcode フックをインストールします:
+
+```bash
+herdr integration install jcode
+```
+
+`session_start` フックはネイティブ復元用の Jcode セッション ID を報告します。Jcode TUI が直接状態を報告していない場合、状態は Herdr のスクリーンマニフェスト検出から得られます。
+
+Herdr はデフォルトで `~/.jcode` を使い、`JCODE_HOME` が設定されていればそちらを使います。設定ディレクトリはあらかじめ存在している必要があります。インストールは `hooks/herdr-agent-session.sh`（Windows では `hooks/herdr-agent-session.ps1`）を書き込み、`config.toml` の `[hooks] session_start` に Herdr エントリを追加します。アンインストールは一致するエントリと管理対象スクリプトだけを削除します。
+
+Herdr は保存された Jcode セッションを `jcode --resume <id>` で resume します。
 
 ## Cursor Agent CLI
 

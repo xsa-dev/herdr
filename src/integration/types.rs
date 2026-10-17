@@ -83,6 +83,12 @@ pub(crate) struct LettaInstallPaths {
 }
 
 #[derive(Debug)]
+pub(crate) struct JcodeInstallPaths {
+    pub hook_path: PathBuf,
+    pub config_path: PathBuf,
+}
+
+#[derive(Debug)]
 pub(crate) struct CursorInstallPaths {
     pub hook_path: PathBuf,
     pub hooks_path: PathBuf,
@@ -146,6 +152,14 @@ pub(crate) struct LettaUninstallResult {
     pub settings_path: PathBuf,
     pub removed_hook_file: bool,
     pub updated_settings: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct JcodeUninstallResult {
+    pub hook_path: PathBuf,
+    pub config_path: PathBuf,
+    pub removed_hook_file: bool,
+    pub updated_config: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
