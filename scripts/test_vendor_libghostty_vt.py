@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import io
+import json
 import subprocess
 import tarfile
 import tempfile
@@ -141,6 +143,66 @@ class VendorLibghosttyVtTests(unittest.TestCase):
         sys_text = sys_zig.read_text()
         self.assertIn('.logFn = @import("terminal/c/sys.zig").logFn', lib_text)
         self.assertIn("if (global.log == null) return;", sys_text)
+
+    def test_pretranspiled_c_provenance_matches_vendor_commit_and_patches(self) -> None:
+        project_root = Path(__file__).resolve().parent.parent
+        vendor_meta = json.loads((project_root / "vendor" / "libghostty-vt.vendor.json").read_text())
+        c_dir = project_root / "vendor" / "libghostty-vt-c"
+        provenance_path = c_dir / "provenance.json"
+        self.assertTrue(provenance_path.exists(), "vendor/libghostty-vt-c/provenance.json must exist")
+
+        provenance = json.loads(provenance_path.read_text())
+        self.assertEqual(provenance["source_commit"], vendor_meta["source_commit"])
+
+        generator = provenance["generator"]
+        self.assertEqual(generator["script"], "scripts/regenerate_libghostty_vt_c.sh")
+        self.assertTrue((project_root / generator["script"]).exists())
+        self.assertEqual(generator["zig_version"], "0.16.0")
+        self.assertFalse(generator["simd"])
+        self.assertFalse(generator["kitty_graphics"])
+        self.assertEqual(provenance["targets"], ["x86_64-linux-gnu", "aarch64-linux-gnu"])
+
+        expected_active_patches = [
+            "vendor/patches/libghostty-vt/0002-expose-modify-other-keys-mode.patch",
+            "vendor/patches/libghostty-vt/0005-bounded-word-selection.patch",
+            "vendor/patches/libghostty-vt/0006-clear-screen-preserving-cursor-line.patch",
+            "vendor/patches/libghostty-vt/0008-cursor-hyperlink-page-replace.patch",
+        ]
+        active_patches = provenance["active_text_patches"]
+        self.assertEqual([entry["path"] for entry in active_patches], expected_active_patches)
+        for entry in active_patches:
+            patch_file = project_root / entry["path"]
+            self.assertTrue(patch_file.exists(), f"missing patch {entry['path']}")
+            actual_sha = hashlib.sha256(patch_file.read_bytes()).hexdigest()
+            self.assertEqual(entry["sha256"], actual_sha, f"digest mismatch for {entry['path']}")
+
+        all_patches = sorted(
+            path.relative_to(project_root).as_posix()
+            for path in (project_root / "vendor" / "patches" / "libghostty-vt").glob("*.patch")
+        )
+        self.assertEqual([entry["path"] for entry in provenance["all_vendored_patches"]], all_patches)
+        for entry in provenance["all_vendored_patches"]:
+            patch_file = project_root / entry["path"]
+            actual_sha = hashlib.sha256(patch_file.read_bytes()).hexdigest()
+            self.assertEqual(entry["sha256"], actual_sha, f"digest mismatch for {entry['path']}")
+
+        forbidden_suffixes = {".a", ".so", ".wasm", ".o", ".dylib", ".dll", ".lib"}
+        actual_files = sorted(
+            path.relative_to(c_dir).as_posix()
+            for path in c_dir.rglob("*")
+            if path.is_file() and path.name != "provenance.json"
+        )
+        binary_blobs = [
+            rel for rel in actual_files if Path(rel).suffix.lower() in forbidden_suffixes
+        ]
+        self.assertEqual(binary_blobs, [], f"unexpected binary blobs in vendor/libghostty-vt-c: {binary_blobs}")
+
+        recorded_files = provenance["generated_files"]
+        self.assertEqual(sorted(entry["path"] for entry in recorded_files), actual_files)
+        for entry in recorded_files:
+            file_path = c_dir / entry["path"]
+            actual_sha = hashlib.sha256(file_path.read_bytes()).hexdigest()
+            self.assertEqual(entry["sha256"], actual_sha, f"digest mismatch for {entry['path']}")
 
 
 if __name__ == "__main__":

@@ -132,9 +132,9 @@ integration-assets-test:
 libghostty-bindings *clang_args:
     bash scripts/generate_libghostty_bindings.sh {{clang_args}}
 
-# Build the vendored libghostty-vt source dist
-build-libghostty-vt:
-    scripts/build_vendored_libghostty_vt.sh
+# Regenerate pre-transpiled C99 sources in vendor/libghostty-vt-c/
+regenerate-libghostty-vt-c:
+    ./scripts/regenerate_libghostty_vt_c.sh
 
 # Check that release docs and changelog have been finalized from docs/next before release
 release-docs-check:

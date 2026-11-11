@@ -1,0 +1,219 @@
+{
+  "source_commit": "44f2a44df7e8c4a0c6df3f7d872ef3d7ead88e51",
+  "version": "1.3.2-HEAD-+44f2a44df",
+  "generator": {
+    "script": "scripts/regenerate_libghostty_vt_c.sh",
+    "tier": 1,
+    "backend": "zig-ofmt-c",
+    "zig_version": "0.16.0",
+    "optimize": "ReleaseFast",
+    "simd": false,
+    "kitty_graphics": false
+  },
+  "targets": [
+    "x86_64-linux-gnu",
+    "aarch64-linux-gnu"
+  ],
+  "active_text_patches": [
+    {
+      "path": "vendor/patches/libghostty-vt/0002-expose-modify-other-keys-mode.patch",
+      "sha256": "03e0f42ae3bf98b8173cbbf4faa8252338669d3cdce3e06e6751ab0770cca7d3"
+    },
+    {
+      "path": "vendor/patches/libghostty-vt/0005-bounded-word-selection.patch",
+      "sha256": "860a12e7db762e45174ea056cdbe4017dc91080df22b7cd795473a4ee4c4ae0e"
+    },
+    {
+      "path": "vendor/patches/libghostty-vt/0006-clear-screen-preserving-cursor-line.patch",
+      "sha256": "8570226466679fe75f743cabc43bafae9bfe50f57d864f45c247a110fa15c325"
+    },
+    {
+      "path": "vendor/patches/libghostty-vt/0008-cursor-hyperlink-page-replace.patch",
+      "sha256": "16d1f9726ef91b11a732e8cd32afe17eaefebc542db63686ed0227c0ebde1a0c"
+    }
+  ],
+  "all_vendored_patches": [
+    {
+      "path": "vendor/patches/libghostty-vt/0002-expose-modify-other-keys-mode.patch",
+      "sha256": "03e0f42ae3bf98b8173cbbf4faa8252338669d3cdce3e06e6751ab0770cca7d3"
+    },
+    {
+      "path": "vendor/patches/libghostty-vt/0004-fix-hosted-wuffs-builds.patch",
+      "sha256": "db61a780094025264a0b35958dc7ae5bbb8cbbe108dfb200430f75a8751743c1"
+    },
+    {
+      "path": "vendor/patches/libghostty-vt/0005-bounded-word-selection.patch",
+      "sha256": "860a12e7db762e45174ea056cdbe4017dc91080df22b7cd795473a4ee4c4ae0e"
+    },
+    {
+      "path": "vendor/patches/libghostty-vt/0006-clear-screen-preserving-cursor-line.patch",
+      "sha256": "8570226466679fe75f743cabc43bafae9bfe50f57d864f45c247a110fa15c325"
+    },
+    {
+      "path": "vendor/patches/libghostty-vt/0007-experimental-png-retention.patch",
+      "sha256": "c584e68d01e3f12c81d10492b314368fb9d3f8d49810483b686679bb208dab4a"
+    },
+    {
+      "path": "vendor/patches/libghostty-vt/0008-cursor-hyperlink-page-replace.patch",
+      "sha256": "16d1f9726ef91b11a732e8cd32afe17eaefebc542db63686ed0227c0ebde1a0c"
+    }
+  ],
+  "generated_files": [
+    {
+      "path": "ghostty_vt_aarch64_linux.c",
+      "sha256": "d5ff4fdb26692a96b9e507751f9e3f21c39988e1f0f1b1b6725e0118ade3ca8b"
+    },
+    {
+      "path": "ghostty_vt_x86_64_linux.c",
+      "sha256": "d3b8ab8553781b39d04536a86c6fb7cbc2e504aa274a89cba3bdef46b698318b"
+    },
+    {
+      "path": "include/ghostty/vt/allocator.h",
+      "sha256": "7cb27e69a89d30368638c5c6e7f233bd73f203ddaec38ecf23899760994c83f6"
+    },
+    {
+      "path": "include/ghostty/vt/build_info.h",
+      "sha256": "535e44c29b5fd9c8df172605f58616df735432f7786ca24e3cc58d7cb3ba8361"
+    },
+    {
+      "path": "include/ghostty/vt/color.h",
+      "sha256": "73e0db10e4b324122be1a8a46bb6619fe5ab264bf6713543336c3e5deb7035f3"
+    },
+    {
+      "path": "include/ghostty/vt/color_scheme.h",
+      "sha256": "eab0dc56e057dfc03334cba109da6e7ae118513cb2be9dc4f3b0bffc7bdad465"
+    },
+    {
+      "path": "include/ghostty/vt/device.h",
+      "sha256": "79c61cd5d54fc15c60d0ce87c69adf89c85b7b748b912c41b91230979f4319fe"
+    },
+    {
+      "path": "include/ghostty/vt/focus.h",
+      "sha256": "ddc28ead578ca9f683a4140420807ec9988a45f669d719e28cdf840913ea56b4"
+    },
+    {
+      "path": "include/ghostty/vt/formatter.h",
+      "sha256": "9945b7aff284597d8801eb9201abc95609b3cf71360e14f2db6b8a527838a8cd"
+    },
+    {
+      "path": "include/ghostty/vt/grid_ref.h",
+      "sha256": "80cc49f02d63025605d605c86f1207638ad9534ce74e9a14766299e0518d4987"
+    },
+    {
+      "path": "include/ghostty/vt/grid_ref_tracked.h",
+      "sha256": "78c65cf69c1a6ee439849175221084366ca4392455503cc44e93cfdf9ddbc021"
+    },
+    {
+      "path": "include/ghostty/vt/io.h",
+      "sha256": "2d79995aadc23ce175b519e3ff401ca20664da9068177aac117e0b490f45daee"
+    },
+    {
+      "path": "include/ghostty/vt/key/encoder.h",
+      "sha256": "6963a275e2ba154a647382c462c416840dcdc2beb6d59aa200d80f37f9a5e196"
+    },
+    {
+      "path": "include/ghostty/vt/key/event.h",
+      "sha256": "0eb11bfab67b887f4b409557b396a5da6ea17e9e62d92b97a38e723b46db635d"
+    },
+    {
+      "path": "include/ghostty/vt/key.h",
+      "sha256": "2de93a84da8e9c1c1f6ac8d1d281ba054869225858a5d88ec8ec5f0d091b5eac"
+    },
+    {
+      "path": "include/ghostty/vt/kitty_graphics.h",
+      "sha256": "2c0f554eda36e7a59b9dfb516b860e7f5b47c6f4d16e6a3032c301ad2e313d1b"
+    },
+    {
+      "path": "include/ghostty/vt/modes.h",
+      "sha256": "bd40aa01f76e4351e09a1825693b27c1e4a53539411968432fc3e59e0f890f66"
+    },
+    {
+      "path": "include/ghostty/vt/mouse/encoder.h",
+      "sha256": "2e409c50fcd06806dd1a86cf66751ff35362c65e14ff588e2592e8a09141c017"
+    },
+    {
+      "path": "include/ghostty/vt/mouse/event.h",
+      "sha256": "68f14cd03109919cb8da36b17f70670334a3369af5c685496118c913c3049abf"
+    },
+    {
+      "path": "include/ghostty/vt/mouse.h",
+      "sha256": "96273f9340608a2694ba56e35d3b1bd108f57882e289b027b5408b19a21ddae7"
+    },
+    {
+      "path": "include/ghostty/vt/osc.h",
+      "sha256": "a5021912c111f199d9b7272301a67bcb87335e56af05b15401c0e9f90d4f99c5"
+    },
+    {
+      "path": "include/ghostty/vt/paste.h",
+      "sha256": "5bfeb6733f29bd00bdccad100c3ccc9f959eff6dc35db5080fcb70af2d55d85d"
+    },
+    {
+      "path": "include/ghostty/vt/point.h",
+      "sha256": "1ed7b2cda14904814727b93d406f39284e8392af706f938cf0fa1dbeaa42e774"
+    },
+    {
+      "path": "include/ghostty/vt/render.h",
+      "sha256": "33db708310fe10fb35d1a3cdd54461a773b6f3f781934aa41a277e69397fada5"
+    },
+    {
+      "path": "include/ghostty/vt/screen.h",
+      "sha256": "d9a3ab36f8410184fd0af4a20de1c1d3a0f09e8bd28ec2de89cb243dbd008fa3"
+    },
+    {
+      "path": "include/ghostty/vt/search.h",
+      "sha256": "57703a9b2bcdc75ce6d0b8c4ca66fbc26dc5b266898dd87a0bab1c0e3c7402a6"
+    },
+    {
+      "path": "include/ghostty/vt/selection.h",
+      "sha256": "fb9a3ad0021da8ba35262f4105396a0f9e69baf28d00d8bb20b59aee7766c6fb"
+    },
+    {
+      "path": "include/ghostty/vt/sgr.h",
+      "sha256": "8292084973e64ce61555c6721591411dba9cf968ea9ae2d9820b4f6c381f1ce5"
+    },
+    {
+      "path": "include/ghostty/vt/size_report.h",
+      "sha256": "a86cd1b0e5cf2307411030646285e5f2dcb1e6ca26e938cb6d578b16301e94a7"
+    },
+    {
+      "path": "include/ghostty/vt/snapshot.h",
+      "sha256": "6fb8e35fb09f47fa37907eb9e6b6ee1e55816437e280a001559a9c7498149597"
+    },
+    {
+      "path": "include/ghostty/vt/style.h",
+      "sha256": "ebb50a1821952dd954dd51d5897f9881c6927abd73b909e2e2f1deb3a52f31a9"
+    },
+    {
+      "path": "include/ghostty/vt/sys.h",
+      "sha256": "5ae31311e2d988a0d77dc5d67c242f08378cb8409689ce46ebb44184e307d2bb"
+    },
+    {
+      "path": "include/ghostty/vt/terminal.h",
+      "sha256": "cee30f18c17067d44c6d96c3f5cf5a9ac834a208729528b1cfe6a6ed11e7c00d"
+    },
+    {
+      "path": "include/ghostty/vt/types.h",
+      "sha256": "6c30315aa292971c5863b90ace46d241682f8baac2fe9244acb785b0c883020e"
+    },
+    {
+      "path": "include/ghostty/vt/unicode.h",
+      "sha256": "d5533c9abcebc9284033eb9c6acc0ed707a3a68a98f0d2e3d8c9b28a2beae796"
+    },
+    {
+      "path": "include/ghostty/vt/wasm.h",
+      "sha256": "0136093c504af9fb2a33b7e50a70cb6b4cee0c2375beed3d73b579c092195fee"
+    },
+    {
+      "path": "include/ghostty/vt.h",
+      "sha256": "014813d7dba136ae6faecb515d23e7d7dc675672094174f91e2d84ab2bb55732"
+    },
+    {
+      "path": "zig.h",
+      "sha256": "7c941dbc2044b548946599031a44957ac03462cb0211759f76a7789c7168e869"
+    },
+    {
+      "path": "zig_rt_shims.c",
+      "sha256": "6480d5e0685a6036790946c1796c94dc14b972a64a54a2ac6cca1568da721948"
+    }
+  ]
+}

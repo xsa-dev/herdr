@@ -151,6 +151,9 @@ async fn surface_delta_updates_global_popup_without_affecting_legacy_peer() {
 
 #[tokio::test]
 async fn surface_delta_preserves_graphics_baseline_through_queue_recovery() {
+    if !crate::ghostty::kitty_graphics_compiled_in() {
+        return;
+    }
     let (mut server, _control_rx, render_rx, pane_id) =
         retained_test_server_with_control(b"text before image");
     server.clients.get_mut(&1).unwrap().cell_size = crate::kitty_graphics::HostCellSize {

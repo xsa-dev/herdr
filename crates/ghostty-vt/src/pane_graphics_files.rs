@@ -9,11 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 #[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, FileExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 
-#[cfg(target_os = "linux")]
-use crate::native_image_sources::clone_native_image_source;
-
-/// Kernel CoW snapshots are deliberately unsupported outside Linux.
-#[cfg(not(target_os = "linux"))]
+/// Kernel CoW snapshots are disabled when Kitty graphics is compiled out.
 fn clone_native_image_source(
     _source_fd: i64,
     _destination: &File,
@@ -21,7 +17,7 @@ fn clone_native_image_source(
 ) -> io::Result<()> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
-        "native source cloning requires Linux",
+        "native source cloning is disabled in C-transpiled VT build",
     ))
 }
 

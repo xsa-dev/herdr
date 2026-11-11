@@ -6232,7 +6232,11 @@ mod tests {
         );
 
         assert!(result.request_render);
-        assert_eq!(result.render_delay, Some(KITTY_GRAPHICS_REDRAW_SETTLE));
+        if crate::ghostty::kitty_graphics_compiled_in() {
+            assert_eq!(result.render_delay, Some(KITTY_GRAPHICS_REDRAW_SETTLE));
+        } else {
+            assert_eq!(result.render_delay, None);
+        }
     }
 
     #[test]
@@ -6338,6 +6342,9 @@ mod tests {
 
     #[test]
     fn render_blanks_kitty_unicode_placeholders_when_graphics_enabled() {
+        if !crate::ghostty::kitty_graphics_compiled_in() {
+            return;
+        }
         crate::kitty_graphics::set_enabled(true);
         let (tx, _rx) = mpsc::channel(4);
         let terminal = crate::ghostty::Terminal::new(20, 5, 0).unwrap();

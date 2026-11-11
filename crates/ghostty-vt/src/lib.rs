@@ -10,24 +10,17 @@
 )]
 pub mod bindings;
 
-use std::cell::Cell;
-use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
 use std::ffi::c_void;
 use std::fmt;
-use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::RangeInclusive;
 use std::os::raw::c_char;
 use std::ptr;
 use std::slice;
-use std::sync::{Arc, Mutex, Once, OnceLock};
+use std::sync::Arc;
 
 use crate::pane_graphics_files::OwnedExport;
-#[cfg(target_os = "linux")]
-mod native_image_sources;
-mod native_source;
 pub mod pane_graphics_files;
 
 /// Terminfo entry the terminal emulates; child processes should see it as TERM.
@@ -202,19 +195,7 @@ pub const MODE_COLOR_SCHEME_REPORT: u16 = 2031;
 const TERMINAL_DATA_COLOR_FOREGROUND: ffi::GhosttyTerminalData = 18;
 const TERMINAL_DATA_COLOR_CURSOR: ffi::GhosttyTerminalData = 20;
 
-const KITTY_IMAGE_STORAGE_LIMIT_BYTES: u64 = 64 * 1024 * 1024;
-const APC_MAX_BYTES: usize = 16 * 1024 * 1024;
-const APC_MAX_BYTES_KITTY: usize = 16 * 1024 * 1024;
 pub const KITTY_UNICODE_PLACEHOLDER: u32 = 0x10EEEE;
-// The vendored C headers expose these placement fields, but the checked-in
-// generated bindings predate the names. Keep the explicit values aligned with
-// vendor/libghostty-vt/include/ghostty/vt/kitty_graphics.h.
-const KITTY_PLACEMENT_DATA_IS_VIRTUAL: ffi::GhosttyKittyGraphicsPlacementData = 3;
-const KITTY_PLACEMENT_DATA_COLUMNS: ffi::GhosttyKittyGraphicsPlacementData = 10;
-const KITTY_PLACEMENT_DATA_ROWS: ffi::GhosttyKittyGraphicsPlacementData = 11;
-
-static INSTALL_PNG_DECODER: Once = Once::new();
-static KITTY_PLACEHOLDER_DIACRITICS: OnceLock<HashMap<u32, u32>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum KittyImageFormat {
@@ -252,14 +233,6 @@ pub struct KittyImageDescriptor {
     pub source_file: bool,
 }
 
-type KittyPlacementPayload = (KittyImageDescriptor, Vec<u8>, Option<Arc<OwnedExport>>);
-
-#[derive(Debug, Clone, Copy)]
-struct KittyImageFingerprintEntry {
-    generation: u64,
-    fingerprint: u64,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KittyPlacementRenderInfo {
     pub pixel_width: u32,
@@ -272,45 +245,6 @@ pub struct KittyPlacementRenderInfo {
     pub source_y: u32,
     pub source_width: u32,
     pub source_height: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct KittyVirtualPlacementSpec {
-    image_id: u32,
-    placement_id: u32,
-    columns: u32,
-    rows: u32,
-    z: i32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct KittyVirtualCell {
-    x: u16,
-    y: u16,
-    image_id_low: u32,
-    image_id_high: Option<u32>,
-    placement_id: Option<u32>,
-    row: Option<u32>,
-    col: Option<u32>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct KittyVirtualRun {
-    x: u16,
-    y: u16,
-    image_id_low: u32,
-    image_id_high: Option<u32>,
-    placement_id: Option<u32>,
-    row: u32,
-    col: u32,
-    width: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct KittyVirtualPlacementGeometry {
-    x_offset: u32,
-    y_offset: u32,
-    render: KittyPlacementRenderInfo,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -694,109 +628,19 @@ unsafe extern "C" fn pwd_changed_trampoline(terminal: ffi::GhosttyTerminal, user
     state.pwd_changes.push(bytes);
 }
 
-fn install_png_decoder_once() {
-    INSTALL_PNG_DECODER.call_once(|| unsafe {
-        let _ = ffi::ghostty_sys_set(
-            ffi::GhosttySysOption_GHOSTTY_SYS_OPT_DECODE_PNG,
-            (decode_png_trampoline as *const ()).cast(),
-        );
-    });
-}
-
-#[cfg(test)]
-thread_local! {
-    static PNG_DECODE_CALLS: Cell<usize> = const { Cell::new(0) };
-}
-
-#[cfg(test)]
-mod native_source_tests;
-#[cfg(test)]
-mod png_forward_tests;
-
-unsafe extern "C" fn decode_png_trampoline(
-    _userdata: *mut c_void,
-    allocator: *const ffi::GhosttyAllocator,
-    data: *const u8,
-    data_len: usize,
-    out: *mut ffi::GhosttySysImage,
-) -> bool {
-    if data.is_null() || out.is_null() {
-        return false;
-    }
-    let bytes = unsafe { slice::from_raw_parts(data, data_len) };
-    #[cfg(test)]
-    PNG_DECODE_CALLS.with(|calls| calls.set(calls.get() + 1));
-    let Some(rgba) = decode_png_rgba(bytes) else {
-        return false;
-    };
-    let ptr = unsafe { ffi::ghostty_alloc(allocator, rgba.data.len()) };
-    if ptr.is_null() {
-        return false;
-    }
-    unsafe {
-        ptr::copy_nonoverlapping(rgba.data.as_ptr(), ptr, rgba.data.len());
-        *out = ffi::GhosttySysImage {
-            width: rgba.width,
-            height: rgba.height,
-            data: ptr,
-            data_len: rgba.data.len(),
-        };
-    }
-    true
-}
-
-struct DecodedPng {
-    width: u32,
-    height: u32,
-    data: Vec<u8>,
-}
-
-fn decode_png_rgba(bytes: &[u8]) -> Option<DecodedPng> {
-    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
-    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-    let mut reader = decoder.read_info().ok()?;
-    let mut buf = vec![0; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut buf).ok()?;
-    let frame = &buf[..info.buffer_size()];
-    if info.bit_depth != png::BitDepth::Eight {
-        return None;
-    }
-
-    let data = match info.color_type {
-        png::ColorType::Rgba => frame.to_vec(),
-        png::ColorType::Rgb => {
-            let mut out = Vec::with_capacity((info.width as usize) * (info.height as usize) * 4);
-            for rgb in frame.chunks_exact(3) {
-                out.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
-            }
-            out
-        }
-        png::ColorType::Grayscale => {
-            let mut out = Vec::with_capacity((info.width as usize) * (info.height as usize) * 4);
-            for gray in frame {
-                out.extend_from_slice(&[*gray, *gray, *gray, 255]);
-            }
-            out
-        }
-        png::ColorType::GrayscaleAlpha => {
-            let mut out = Vec::with_capacity((info.width as usize) * (info.height as usize) * 4);
-            for ga in frame.chunks_exact(2) {
-                out.extend_from_slice(&[ga[0], ga[0], ga[0], ga[1]]);
-            }
-            out
-        }
-        png::ColorType::Indexed => return None,
-    };
-
-    Some(DecodedPng {
-        width: info.width,
-        height: info.height,
-        data,
-    })
-}
-
 pub fn unicode_codepoint_width(codepoint: u32) -> u8 {
     unsafe { ffi::ghostty_unicode_codepoint_width(codepoint) }
+}
+
+pub fn kitty_graphics_compiled_in() -> bool {
+    let mut value = false;
+    let result = unsafe {
+        ffi::ghostty_build_info(
+            ffi::GhosttyBuildInfo_GHOSTTY_BUILD_INFO_KITTY_GRAPHICS,
+            (&mut value as *mut bool).cast(),
+        )
+    };
+    result == ffi::GhosttyResult_GHOSTTY_SUCCESS && value
 }
 
 pub fn unicode_grapheme_width(codepoints: &[u32]) -> (usize, u8) {
@@ -851,9 +695,6 @@ pub struct Terminal {
     #[cfg(windows)]
     tracked_row: ffi::GhosttyTrackedGridRef,
     callback_state: Box<TerminalCallbackState>,
-    kitty_fingerprints: Mutex<HashMap<u32, KittyImageFingerprintEntry>>,
-    kitty_empty_generation: Cell<Option<u64>>,
-    kitty_png_forwarding: bool,
 }
 
 impl Terminal {
@@ -877,14 +718,9 @@ impl Terminal {
                 },
                 ..Default::default()
             }),
-            kitty_fingerprints: Mutex::new(HashMap::new()),
-            kitty_empty_generation: Cell::new(None),
-            kitty_png_forwarding: false,
         };
         let userdata = (&mut *terminal.callback_state as *mut TerminalCallbackState).cast();
         let glyph_protocol = false;
-        // libghostty enables image storage by default; Herdr opts in explicitly.
-        let kitty_storage_limit: u64 = 0;
         let terminfo_name = ffi::GhosttyString {
             ptr: TERM.as_ptr().cast(),
             len: TERM.len(),
@@ -896,12 +732,6 @@ impl Terminal {
         let clipboard_callback: ffi::GhosttyTerminalClipboardWriteFn =
             Some(clipboard_write_trampoline);
         unsafe {
-            ffi::ghostty_terminal_set(
-                terminal.raw,
-                ffi::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT,
-                (&kitty_storage_limit as *const u64).cast(),
-            )
-            .into_result()?;
             ffi::ghostty_terminal_set(
                 terminal.raw,
                 ffi::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_TERMINFO_NAME,
@@ -963,10 +793,6 @@ impl Terminal {
             )
             .into_result()?;
         }
-        // Disabling storage advances its generation even though it is empty.
-        terminal
-            .kitty_empty_generation
-            .set(Some(terminal.kitty_graphics_generation()?));
         Ok(terminal)
     }
 
@@ -1072,72 +898,10 @@ impl Terminal {
     }
 
     pub fn enable_kitty_graphics(&mut self) -> Result<(), Error> {
-        install_png_decoder_once();
-        let storage_limit = KITTY_IMAGE_STORAGE_LIMIT_BYTES;
-        let enable_medium = true;
-        let temp_dir = std::env::temp_dir();
-        let temp_dir = temp_dir.to_string_lossy();
-        let temp_dir = ffi::GhosttyString {
-            ptr: temp_dir.as_ptr().cast(),
-            len: temp_dir.len(),
-        };
-        unsafe {
-            ffi::ghostty_terminal_set(
-                self.raw,
-                ffi::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT,
-                (&storage_limit as *const u64).cast(),
-            )
-            .into_result()?;
-            ffi::ghostty_terminal_set(
-                self.raw,
-                ffi::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_FILE,
-                (&enable_medium as *const bool).cast(),
-            )
-            .into_result()?;
-            ffi::ghostty_terminal_set(
-                self.raw,
-                ffi::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE,
-                (&temp_dir as *const ffi::GhosttyString).cast(),
-            )
-            .into_result()?;
-            ffi::ghostty_terminal_set(
-                self.raw,
-                ffi::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_SHARED_MEM,
-                (&enable_medium as *const bool).cast(),
-            )
-            .into_result()?;
-            ffi::ghostty_terminal_set(
-                self.raw,
-                ffi::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_APC_MAX_BYTES,
-                (&APC_MAX_BYTES as *const usize).cast(),
-            )
-            .into_result()?;
-            ffi::ghostty_terminal_set(
-                self.raw,
-                ffi::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_APC_MAX_BYTES_KITTY,
-                (&APC_MAX_BYTES_KITTY as *const usize).cast(),
-            )
-            .into_result()?;
-        }
-        self.set_kitty_source_forwarding(true)?;
         Ok(())
     }
 
-    pub fn set_kitty_source_forwarding(&mut self, enabled: bool) -> Result<(), Error> {
-        native_source::set_forwarding(self.raw, enabled)
-    }
-
-    #[cfg(test)]
-    fn set_kitty_png_forwarding(&mut self, enabled: bool) -> Result<(), Error> {
-        unsafe {
-            ffi::ghostty_terminal_set(
-                self.raw,
-                ffi::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_PRESERVE_PNG,
-                (&enabled as *const bool).cast(),
-            )
-            .into_result()?;
-        }
-        self.kitty_png_forwarding = enabled;
+    pub fn set_kitty_source_forwarding(&mut self, _enabled: bool) -> Result<(), Error> {
         Ok(())
     }
 
@@ -1830,473 +1594,37 @@ impl Terminal {
         }
     }
 
-    fn kitty_graphics(&self) -> Result<ffi::GhosttyKittyGraphics, Error> {
-        let mut graphics: ffi::GhosttyKittyGraphics = ptr::null_mut();
-        unsafe {
-            ffi::ghostty_terminal_get(
-                self.raw,
-                ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_KITTY_GRAPHICS,
-                (&mut graphics as *mut ffi::GhosttyKittyGraphics).cast(),
-            )
-            .into_result()?;
-        }
-        Ok(graphics)
-    }
-
     pub fn kitty_graphics_generation(&self) -> Result<u64, Error> {
-        let graphics = self.kitty_graphics()?;
-        if graphics.is_null() {
-            return Ok(0);
-        }
-        kitty_graphics_u64(
-            graphics,
-            ffi::GhosttyKittyGraphicsData_GHOSTTY_KITTY_GRAPHICS_DATA_GENERATION,
-        )
+        Ok(0)
     }
 
     pub fn kitty_graphics_may_have_placements(&self) -> Result<bool, Error> {
-        let generation = self.kitty_graphics_generation()?;
-        Ok(generation != 0 && self.kitty_empty_generation.get() != Some(generation))
+        Ok(false)
     }
 
     /// Current fingerprint of each stored image, placed or not, when it is known
     /// without hashing pixels. `None` means deleted or replaced since last seen.
     pub fn kitty_image_fingerprints(&self, image_ids: &[u32]) -> Result<Vec<Option<u64>>, Error> {
-        let graphics = self.kitty_graphics()?;
-        if graphics.is_null() {
-            return Ok(vec![None; image_ids.len()]);
-        }
-        image_ids
-            .iter()
-            .map(|&image_id| {
-                let image = unsafe { ffi::ghostty_kitty_graphics_image(graphics, image_id) };
-                if image.is_null() {
-                    return Ok(None);
-                }
-                if let Some(source) = native_source::image_source(image)? {
-                    return Ok(Some(source.fingerprint()));
-                }
-                let generation = kitty_image_u64(
-                    image,
-                    ffi::GhosttyKittyGraphicsImageData_GHOSTTY_KITTY_IMAGE_DATA_GENERATION,
-                )?;
-                Ok(self.kitty_fingerprints.lock().ok().and_then(|cache| {
-                    cache
-                        .get(&image_id)
-                        .filter(|entry| entry.generation == generation)
-                        .map(|entry| entry.fingerprint)
-                }))
-            })
-            .collect()
+        Ok(vec![None; image_ids.len()])
     }
 
     pub fn kitty_image_placements(&self) -> Result<Vec<KittyImagePlacement>, Error> {
-        self.kitty_image_placements_with_data_filter(|_| true)
+        Ok(Vec::new())
     }
 
     pub fn kitty_image_placements_with_data_filter<F>(
         &self,
-        mut needs_data: F,
+        needs_data: F,
     ) -> Result<Vec<KittyImagePlacement>, Error>
     where
         F: FnMut(KittyImageDescriptor) -> bool,
     {
-        let graphics = self.kitty_graphics()?;
-        if graphics.is_null() {
-            return Ok(Vec::new());
-        }
-        let generation = kitty_graphics_u64(
-            graphics,
-            ffi::GhosttyKittyGraphicsData_GHOSTTY_KITTY_GRAPHICS_DATA_GENERATION,
-        )?;
-        if generation == 0 || self.kitty_empty_generation.get() == Some(generation) {
-            return Ok(Vec::new());
-        }
-
-        let mut iterator: ffi::GhosttyKittyGraphicsPlacementIterator = ptr::null_mut();
-        unsafe {
-            ffi::ghostty_kitty_graphics_placement_iterator_new(ptr::null(), &mut iterator)
-                .into_result()?;
-            ffi::ghostty_kitty_graphics_get(
-                graphics,
-                ffi::GhosttyKittyGraphicsData_GHOSTTY_KITTY_GRAPHICS_DATA_PLACEMENT_ITERATOR,
-                (&mut iterator as *mut ffi::GhosttyKittyGraphicsPlacementIterator).cast(),
-            )
-            .into_result()?;
-        }
-        let _guard = KittyPlacementIteratorGuard { raw: iterator };
-
-        let mut placements = Vec::new();
-        let mut storage_has_placements = false;
-        while unsafe { ffi::ghostty_kitty_graphics_placement_next(iterator) } {
-            storage_has_placements = true;
-            if let Some(placement) =
-                self.kitty_image_placement(graphics, iterator, &mut needs_data)?
-            {
-                placements.push(placement);
-            }
-        }
-        if !storage_has_placements {
-            self.kitty_empty_generation.set(Some(generation));
-            self.prune_kitty_fingerprints(graphics);
-            return Ok(Vec::new());
-        }
-
-        placements.extend(self.kitty_virtual_image_placements(graphics, &mut needs_data)?);
-        placements.sort_by_key(|placement| placement.z);
-        self.prune_kitty_fingerprints(graphics);
-        Ok(placements)
-    }
-
-    /// Fingerprint for `image`, cached per image id and recomputed only when
-    /// the image's generation changes.
-    fn kitty_image_fingerprint_cached(
-        &self,
-        image: ffi::GhosttyKittyGraphicsImage,
-        image_id: u32,
-        data: (*const u8, usize),
-        image_width: u32,
-        image_height: u32,
-        format: KittyImageFormat,
-    ) -> u64 {
-        let (data_ptr, data_len) = data;
-        let Ok(generation) = kitty_image_u64(
-            image,
-            ffi::GhosttyKittyGraphicsImageData_GHOSTTY_KITTY_IMAGE_DATA_GENERATION,
-        ) else {
-            return kitty_image_fingerprint(data_ptr, data_len, image_width, image_height, format);
-        };
-
-        if let Ok(cache) = self.kitty_fingerprints.lock() {
-            if let Some(entry) = cache.get(&image_id) {
-                if entry.generation == generation {
-                    return entry.fingerprint;
-                }
-            }
-        }
-
-        let fingerprint =
-            kitty_image_fingerprint(data_ptr, data_len, image_width, image_height, format);
-        if let Ok(mut cache) = self.kitty_fingerprints.lock() {
-            cache.insert(
-                image_id,
-                KittyImageFingerprintEntry {
-                    generation,
-                    fingerprint,
-                },
-            );
-        }
-        fingerprint
-    }
-
-    /// Keeps fingerprints for hidden images so scrolling them back into view
-    /// does not re-hash their pixels; generation checks catch replacements.
-    fn prune_kitty_fingerprints(&self, graphics: ffi::GhosttyKittyGraphics) {
-        if let Ok(mut cache) = self.kitty_fingerprints.lock() {
-            cache.retain(|image_id, _| {
-                !unsafe { ffi::ghostty_kitty_graphics_image(graphics, *image_id) }.is_null()
-            });
-        }
-    }
-
-    // Retained files are authoritative: never ask the native lazy decoder for
-    // pixels just to describe a placement or calculate its cache identity.
-    fn kitty_placement_payload<F>(
-        &self,
-        image: ffi::GhosttyKittyGraphicsImage,
-        image_id: u32,
-        placement_id: u32,
-        image_width: u32,
-        image_height: u32,
-        decoded_format: KittyImageFormat,
-        needs_data: &mut F,
-    ) -> Result<KittyPlacementPayload, Error>
-    where
-        F: FnMut(KittyImageDescriptor) -> bool,
-    {
-        let source_file = native_source::image_source(image)?;
-        let (format, data_ptr, data_len, data_fingerprint) = if let Some(source) = &source_file {
-            (
-                KittyImageFormat::Rgba,
-                ptr::null(),
-                source.len(),
-                source.fingerprint(),
-            )
-        } else {
-            let (format, data_ptr, data_len) =
-                kitty_image_transmission_payload(image, decoded_format, self.kitty_png_forwarding)?;
-            let fingerprint = self.kitty_image_fingerprint_cached(
-                image,
-                image_id,
-                (data_ptr, data_len),
-                image_width,
-                image_height,
-                format,
-            );
-            (format, data_ptr, data_len, fingerprint)
-        };
-        let descriptor = KittyImageDescriptor {
-            image_id,
-            placement_id,
-            image_width,
-            image_height,
-            format,
-            data_len,
-            data_fingerprint,
-            source_file: source_file.is_some(),
-        };
-        let data = if needs_data(descriptor) {
-            match &source_file {
-                Some(source) => source
-                    .copy_rgba()
-                    .map_err(|_| Error(ffi::GhosttyResult_GHOSTTY_INVALID_VALUE))?,
-                None => kitty_image_data_from_ptr(data_ptr, data_len),
-            }
-        } else {
-            Vec::new()
-        };
-        Ok((descriptor, data, source_file))
-    }
-
-    fn kitty_image_placement<F>(
-        &self,
-        graphics: ffi::GhosttyKittyGraphics,
-        iterator: ffi::GhosttyKittyGraphicsPlacementIterator,
-        needs_data: &mut F,
-    ) -> Result<Option<KittyImagePlacement>, Error>
-    where
-        F: FnMut(KittyImageDescriptor) -> bool,
-    {
-        let image_id = kitty_placement_u32(
-            iterator,
-            ffi::GhosttyKittyGraphicsPlacementData_GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_IMAGE_ID,
-        )?;
-        if kitty_placement_bool(iterator, KITTY_PLACEMENT_DATA_IS_VIRTUAL)? {
-            return Ok(None);
-        }
-        let image = unsafe { ffi::ghostty_kitty_graphics_image(graphics, image_id) };
-        if image.is_null() {
-            return Ok(None);
-        }
-
-        let mut raw_info = ffi::GhosttyKittyGraphicsPlacementRenderInfo {
-            size: mem::size_of::<ffi::GhosttyKittyGraphicsPlacementRenderInfo>(),
-            ..Default::default()
-        };
-        unsafe {
-            ffi::ghostty_kitty_graphics_placement_render_info(
-                iterator,
-                image,
-                self.raw,
-                &mut raw_info,
-            )
-            .into_result()?;
-        }
-        if !raw_info.viewport_visible {
-            return Ok(None);
-        }
-
-        let image_width = kitty_image_u32(
-            image,
-            ffi::GhosttyKittyGraphicsImageData_GHOSTTY_KITTY_IMAGE_DATA_WIDTH,
-        )?;
-        let image_height = kitty_image_u32(
-            image,
-            ffi::GhosttyKittyGraphicsImageData_GHOSTTY_KITTY_IMAGE_DATA_HEIGHT,
-        )?;
-        let format = kitty_image_format(image)?;
-        let compression = kitty_image_compression(image)?;
-        if compression != ffi::GhosttyKittyImageCompression_GHOSTTY_KITTY_IMAGE_COMPRESSION_NONE {
-            return Ok(None);
-        }
-        let placement_id = kitty_placement_u32(
-            iterator,
-            ffi::GhosttyKittyGraphicsPlacementData_GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_PLACEMENT_ID,
-        )?;
-        let (descriptor, data, source_file) = self.kitty_placement_payload(
-            image,
-            image_id,
-            placement_id,
-            image_width,
-            image_height,
-            format,
-            needs_data,
-        )?;
-        let KittyImageDescriptor {
-            format,
-            data_len,
-            data_fingerprint,
-            ..
-        } = descriptor;
-        let x_offset = kitty_placement_u32(
-            iterator,
-            ffi::GhosttyKittyGraphicsPlacementData_GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_X_OFFSET,
-        )?;
-        let y_offset = kitty_placement_u32(
-            iterator,
-            ffi::GhosttyKittyGraphicsPlacementData_GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_Y_OFFSET,
-        )?;
-        let z = kitty_placement_i32(
-            iterator,
-            ffi::GhosttyKittyGraphicsPlacementData_GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_Z,
-        )?;
-
-        Ok(Some(KittyImagePlacement {
-            image_id,
-            placement_id,
-            z,
-            x_offset,
-            y_offset,
-            image_width,
-            image_height,
-            format,
-            data_len,
-            data_fingerprint,
-            data,
-            source_file,
-            render: KittyPlacementRenderInfo {
-                pixel_width: raw_info.pixel_width,
-                pixel_height: raw_info.pixel_height,
-                grid_cols: raw_info.grid_cols,
-                grid_rows: raw_info.grid_rows,
-                viewport_col: raw_info.viewport_col,
-                viewport_row: raw_info.viewport_row,
-                source_x: raw_info.source_x,
-                source_y: raw_info.source_y,
-                source_width: raw_info.source_width,
-                source_height: raw_info.source_height,
-            },
-        }))
-    }
-
-    fn kitty_virtual_image_placements<F>(
-        &self,
-        graphics: ffi::GhosttyKittyGraphics,
-        needs_data: &mut F,
-    ) -> Result<Vec<KittyImagePlacement>, Error>
-    where
-        F: FnMut(KittyImageDescriptor) -> bool,
-    {
-        let specs = kitty_virtual_placement_specs(graphics)?;
-        if specs.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let viewport_cols = self.cols()?.max(1);
-        let viewport_rows = self.rows()?.max(1);
-        let cell_width = (self.width_px()? / u32::from(viewport_cols)).max(1);
-        let cell_height = (self.height_px()? / u32::from(viewport_rows)).max(1);
-        let mut runs = Vec::new();
-        for y in 0..viewport_rows {
-            let mut current: Option<KittyVirtualRun> = None;
-            for x in 0..viewport_cols {
-                let (graphemes, style) = self.viewport_graphemes_and_style(x, u32::from(y))?;
-                let cell = kitty_virtual_cell(x, y, &graphemes, style);
-                match cell {
-                    Some(cell) => {
-                        if let Some(run) = current.as_mut() {
-                            if run.append(cell) {
-                                continue;
-                            }
-                            runs.push(*run);
-                        }
-                        current = Some(KittyVirtualRun::from_cell(cell));
-                    }
-                    None => {
-                        if let Some(run) = current.take() {
-                            runs.push(run);
-                        }
-                    }
-                }
-            }
-            if let Some(run) = current {
-                runs.push(run);
-            }
-        }
-
-        let mut placements = Vec::new();
-        for run in runs {
-            let image_id = run.image_id();
-            let Some(spec) = find_virtual_placement_spec(&specs, image_id, run.placement_id())
-            else {
-                continue;
-            };
-            let image = unsafe { ffi::ghostty_kitty_graphics_image(graphics, image_id) };
-            if image.is_null() {
-                continue;
-            }
-            let image_width = kitty_image_u32(
-                image,
-                ffi::GhosttyKittyGraphicsImageData_GHOSTTY_KITTY_IMAGE_DATA_WIDTH,
-            )?;
-            let image_height = kitty_image_u32(
-                image,
-                ffi::GhosttyKittyGraphicsImageData_GHOSTTY_KITTY_IMAGE_DATA_HEIGHT,
-            )?;
-            let format = kitty_image_format(image)?;
-            let compression = kitty_image_compression(image)?;
-            if compression != ffi::GhosttyKittyImageCompression_GHOSTTY_KITTY_IMAGE_COMPRESSION_NONE
-            {
-                continue;
-            }
-            let Some(geometry) = kitty_virtual_placement_geometry(
-                run,
-                *spec,
-                image_width,
-                image_height,
-                cell_width,
-                cell_height,
-            ) else {
-                continue;
-            };
-            let placement_id = run.synthetic_placement_id();
-            let (descriptor, data, source_file) = self.kitty_placement_payload(
-                image,
-                image_id,
-                placement_id,
-                image_width,
-                image_height,
-                format,
-                needs_data,
-            )?;
-            let KittyImageDescriptor {
-                format,
-                data_len,
-                data_fingerprint,
-                ..
-            } = descriptor;
-            placements.push(KittyImagePlacement {
-                image_id,
-                placement_id,
-                z: spec.z,
-                x_offset: geometry.x_offset,
-                y_offset: geometry.y_offset,
-                image_width,
-                image_height,
-                format,
-                data_len,
-                data_fingerprint,
-                data,
-                source_file,
-                render: geometry.render,
-            });
-        }
-
-        Ok(placements)
+        let _ = needs_data;
+        Ok(Vec::new())
     }
 
     fn raw(&self) -> ffi::GhosttyTerminal {
         self.raw
-    }
-}
-
-struct KittyPlacementIteratorGuard {
-    raw: ffi::GhosttyKittyGraphicsPlacementIterator,
-}
-
-impl Drop for KittyPlacementIteratorGuard {
-    fn drop(&mut self) {
-        unsafe { ffi::ghostty_kitty_graphics_placement_iterator_free(self.raw) }
     }
 }
 
@@ -2415,446 +1743,6 @@ fn grid_ref_wrap_state(grid_ref: &ffi::GhosttyGridRef) -> Result<(bool, bool), E
         .into_result()?;
     }
     Ok((soft_wrapped, wrap_continuation))
-}
-
-fn kitty_placement_u32(
-    iterator: ffi::GhosttyKittyGraphicsPlacementIterator,
-    data: ffi::GhosttyKittyGraphicsPlacementData,
-) -> Result<u32, Error> {
-    let mut out = 0u32;
-    unsafe {
-        ffi::ghostty_kitty_graphics_placement_get(iterator, data, (&mut out as *mut u32).cast())
-            .into_result()?;
-    }
-    Ok(out)
-}
-
-fn kitty_placement_i32(
-    iterator: ffi::GhosttyKittyGraphicsPlacementIterator,
-    data: ffi::GhosttyKittyGraphicsPlacementData,
-) -> Result<i32, Error> {
-    let mut out = 0i32;
-    unsafe {
-        ffi::ghostty_kitty_graphics_placement_get(iterator, data, (&mut out as *mut i32).cast())
-            .into_result()?;
-    }
-    Ok(out)
-}
-
-fn kitty_placement_bool(
-    iterator: ffi::GhosttyKittyGraphicsPlacementIterator,
-    data: ffi::GhosttyKittyGraphicsPlacementData,
-) -> Result<bool, Error> {
-    let mut out = false;
-    unsafe {
-        ffi::ghostty_kitty_graphics_placement_get(iterator, data, (&mut out as *mut bool).cast())
-            .into_result()?;
-    }
-    Ok(out)
-}
-
-fn kitty_virtual_placement_specs(
-    graphics: ffi::GhosttyKittyGraphics,
-) -> Result<Vec<KittyVirtualPlacementSpec>, Error> {
-    let mut iterator: ffi::GhosttyKittyGraphicsPlacementIterator = ptr::null_mut();
-    unsafe {
-        ffi::ghostty_kitty_graphics_placement_iterator_new(ptr::null(), &mut iterator)
-            .into_result()?;
-        ffi::ghostty_kitty_graphics_get(
-            graphics,
-            ffi::GhosttyKittyGraphicsData_GHOSTTY_KITTY_GRAPHICS_DATA_PLACEMENT_ITERATOR,
-            (&mut iterator as *mut ffi::GhosttyKittyGraphicsPlacementIterator).cast(),
-        )
-        .into_result()?;
-    }
-    let _guard = KittyPlacementIteratorGuard { raw: iterator };
-
-    let mut specs = Vec::new();
-    while unsafe { ffi::ghostty_kitty_graphics_placement_next(iterator) } {
-        if !kitty_placement_bool(iterator, KITTY_PLACEMENT_DATA_IS_VIRTUAL)? {
-            continue;
-        }
-        specs.push(KittyVirtualPlacementSpec {
-            image_id: kitty_placement_u32(
-                iterator,
-                ffi::GhosttyKittyGraphicsPlacementData_GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_IMAGE_ID,
-            )?,
-            placement_id: kitty_placement_u32(
-                iterator,
-                ffi::GhosttyKittyGraphicsPlacementData_GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_PLACEMENT_ID,
-            )?,
-            columns: kitty_placement_u32(iterator, KITTY_PLACEMENT_DATA_COLUMNS)?,
-            rows: kitty_placement_u32(iterator, KITTY_PLACEMENT_DATA_ROWS)?,
-            z: kitty_placement_i32(
-                iterator,
-                ffi::GhosttyKittyGraphicsPlacementData_GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_Z,
-            )?,
-        });
-    }
-    Ok(specs)
-}
-
-fn find_virtual_placement_spec(
-    specs: &[KittyVirtualPlacementSpec],
-    image_id: u32,
-    placement_id: u32,
-) -> Option<&KittyVirtualPlacementSpec> {
-    if placement_id > 0 {
-        specs
-            .iter()
-            .find(|spec| spec.image_id == image_id && spec.placement_id == placement_id)
-    } else {
-        specs.iter().find(|spec| spec.image_id == image_id)
-    }
-}
-
-fn kitty_virtual_cell(
-    x: u16,
-    y: u16,
-    graphemes: &[u32],
-    style: CellStyle,
-) -> Option<KittyVirtualCell> {
-    if graphemes.first().copied() != Some(KITTY_UNICODE_PLACEHOLDER) {
-        return None;
-    }
-    let image_id_low = style
-        .fg_color
-        .map(kitty_placeholder_color_to_id)
-        .unwrap_or(0);
-    let placement_id = style
-        .underline_color
-        .map(kitty_placeholder_color_to_id)
-        .filter(|id| *id != 0);
-    let row = graphemes
-        .get(1)
-        .and_then(|codepoint| kitty_placeholder_diacritic_index(*codepoint));
-    let col = graphemes
-        .get(2)
-        .and_then(|codepoint| kitty_placeholder_diacritic_index(*codepoint));
-    let image_id_high = graphemes
-        .get(3)
-        .and_then(|codepoint| kitty_placeholder_diacritic_index(*codepoint))
-        .filter(|high| *high <= u32::from(u8::MAX));
-
-    Some(KittyVirtualCell {
-        x,
-        y,
-        image_id_low,
-        image_id_high,
-        placement_id,
-        row,
-        col,
-    })
-}
-
-fn kitty_placeholder_color_to_id(color: CellColor) -> u32 {
-    match color {
-        CellColor::Palette(value) => value.into(),
-        CellColor::Rgb(color) => {
-            (u32::from(color.r) << 16) | (u32::from(color.g) << 8) | u32::from(color.b)
-        }
-    }
-}
-
-fn kitty_placeholder_diacritic_index(codepoint: u32) -> Option<u32> {
-    let map = KITTY_PLACEHOLDER_DIACRITICS.get_or_init(|| {
-        // Reuse Ghostty's vendored table so Herdr decodes the same placeholder
-        // row/column diacritics that libghostty accepts.
-        let source =
-            include_str!("../../../vendor/libghostty-vt/src/terminal/kitty/graphics_unicode.zig");
-        let mut map = HashMap::new();
-        let mut in_table = false;
-        for line in source.lines() {
-            let line = line.trim();
-            if line.starts_with("const diacritics:") {
-                in_table = true;
-                continue;
-            }
-            if !in_table {
-                continue;
-            }
-            if line == "};" {
-                break;
-            }
-            let Some(hex) = line
-                .strip_prefix("0x")
-                .and_then(|value| value.strip_suffix(','))
-            else {
-                continue;
-            };
-            if let Ok(value) = u32::from_str_radix(hex, 16) {
-                map.insert(value, map.len() as u32);
-            }
-        }
-        map
-    });
-    map.get(&codepoint).copied()
-}
-
-fn kitty_virtual_placement_geometry(
-    run: KittyVirtualRun,
-    spec: KittyVirtualPlacementSpec,
-    image_width: u32,
-    image_height: u32,
-    cell_width: u32,
-    cell_height: u32,
-) -> Option<KittyVirtualPlacementGeometry> {
-    let grid_cols = if spec.columns == 0 {
-        image_width.saturating_add(cell_width - 1) / cell_width
-    } else {
-        spec.columns
-    }
-    .max(1);
-    let grid_rows = if spec.rows == 0 {
-        image_height.saturating_add(cell_height - 1) / cell_height
-    } else {
-        spec.rows
-    }
-    .max(1);
-
-    if run.col >= grid_cols || run.row >= grid_rows {
-        return None;
-    }
-    let visible_cols = run.width.min(grid_cols.saturating_sub(run.col)).max(1);
-    let visible_rows = 1;
-    let source_x = scale_u32(run.col, image_width, grid_cols);
-    let source_y = scale_u32(run.row, image_height, grid_rows);
-    let source_width = scale_u32(visible_cols, image_width, grid_cols)
-        .max(1)
-        .min(image_width.saturating_sub(source_x));
-    let source_height = scale_u32(visible_rows, image_height, grid_rows)
-        .max(1)
-        .min(image_height.saturating_sub(source_y));
-    if source_width == 0 || source_height == 0 {
-        return None;
-    }
-
-    Some(KittyVirtualPlacementGeometry {
-        x_offset: 0,
-        y_offset: 0,
-        render: KittyPlacementRenderInfo {
-            pixel_width: visible_cols.saturating_mul(cell_width).max(1),
-            pixel_height: visible_rows.saturating_mul(cell_height).max(1),
-            grid_cols: visible_cols,
-            grid_rows: visible_rows,
-            viewport_col: i32::from(run.x),
-            viewport_row: i32::from(run.y),
-            source_x,
-            source_y,
-            source_width,
-            source_height,
-        },
-    })
-}
-
-fn scale_u32(value: u32, source: u32, dest: u32) -> u32 {
-    ((u64::from(value)).saturating_mul(u64::from(source)) / u64::from(dest.max(1)))
-        .min(u64::from(u32::MAX)) as u32
-}
-
-impl KittyVirtualRun {
-    fn from_cell(cell: KittyVirtualCell) -> Self {
-        Self {
-            x: cell.x,
-            y: cell.y,
-            image_id_low: cell.image_id_low,
-            image_id_high: cell.image_id_high,
-            placement_id: cell.placement_id,
-            row: cell.row.unwrap_or(0),
-            col: cell.col.unwrap_or(0),
-            width: 1,
-        }
-    }
-
-    fn append(&mut self, cell: KittyVirtualCell) -> bool {
-        if self.image_id_low != cell.image_id_low
-            || self.placement_id != cell.placement_id
-            || cell.row.is_some_and(|row| row != self.row)
-            || cell.col.is_some_and(|col| col != self.col + self.width)
-            || cell
-                .image_id_high
-                .is_some_and(|high| Some(high) != self.image_id_high)
-        {
-            return false;
-        }
-        self.width += 1;
-        true
-    }
-
-    fn image_id(self) -> u32 {
-        self.image_id_low | (self.image_id_high.unwrap_or(0) << 24)
-    }
-
-    fn placement_id(self) -> u32 {
-        self.placement_id.unwrap_or(0)
-    }
-
-    fn synthetic_placement_id(self) -> u32 {
-        let mut hasher = DefaultHasher::new();
-        self.image_id().hash(&mut hasher);
-        self.placement_id().hash(&mut hasher);
-        self.row.hash(&mut hasher);
-        self.col.hash(&mut hasher);
-        self.width.hash(&mut hasher);
-        self.x.hash(&mut hasher);
-        self.y.hash(&mut hasher);
-        1 + ((hasher.finish() as u32) % 900_000)
-    }
-}
-
-fn kitty_graphics_u64(
-    graphics: ffi::GhosttyKittyGraphics,
-    data: ffi::GhosttyKittyGraphicsData,
-) -> Result<u64, Error> {
-    let mut out = 0u64;
-    unsafe {
-        ffi::ghostty_kitty_graphics_get(graphics, data, (&mut out as *mut u64).cast())
-            .into_result()?;
-    }
-    Ok(out)
-}
-
-fn kitty_image_u32(
-    image: ffi::GhosttyKittyGraphicsImage,
-    data: ffi::GhosttyKittyGraphicsImageData,
-) -> Result<u32, Error> {
-    let mut out = 0u32;
-    unsafe {
-        ffi::ghostty_kitty_graphics_image_get(image, data, (&mut out as *mut u32).cast())
-            .into_result()?;
-    }
-    Ok(out)
-}
-
-fn kitty_image_u64(
-    image: ffi::GhosttyKittyGraphicsImage,
-    data: ffi::GhosttyKittyGraphicsImageData,
-) -> Result<u64, Error> {
-    let mut out = 0u64;
-    unsafe {
-        ffi::ghostty_kitty_graphics_image_get(image, data, (&mut out as *mut u64).cast())
-            .into_result()?;
-    }
-    Ok(out)
-}
-
-fn kitty_image_format(image: ffi::GhosttyKittyGraphicsImage) -> Result<KittyImageFormat, Error> {
-    let mut out = ffi::GhosttyKittyImageFormat_GHOSTTY_KITTY_IMAGE_FORMAT_RGBA;
-    unsafe {
-        ffi::ghostty_kitty_graphics_image_get(
-            image,
-            ffi::GhosttyKittyGraphicsImageData_GHOSTTY_KITTY_IMAGE_DATA_FORMAT,
-            (&mut out as *mut ffi::GhosttyKittyImageFormat).cast(),
-        )
-        .into_result()?;
-    }
-    match out {
-        ffi::GhosttyKittyImageFormat_GHOSTTY_KITTY_IMAGE_FORMAT_RGB => Ok(KittyImageFormat::Rgb),
-        ffi::GhosttyKittyImageFormat_GHOSTTY_KITTY_IMAGE_FORMAT_RGBA => Ok(KittyImageFormat::Rgba),
-        ffi::GhosttyKittyImageFormat_GHOSTTY_KITTY_IMAGE_FORMAT_PNG => Ok(KittyImageFormat::Png),
-        _ => Err(Error(ffi::GhosttyResult_GHOSTTY_INVALID_VALUE)),
-    }
-}
-
-fn kitty_image_compression(
-    image: ffi::GhosttyKittyGraphicsImage,
-) -> Result<ffi::GhosttyKittyImageCompression, Error> {
-    let mut out = ffi::GhosttyKittyImageCompression_GHOSTTY_KITTY_IMAGE_COMPRESSION_NONE;
-    unsafe {
-        ffi::ghostty_kitty_graphics_image_get(
-            image,
-            ffi::GhosttyKittyGraphicsImageData_GHOSTTY_KITTY_IMAGE_DATA_COMPRESSION,
-            (&mut out as *mut ffi::GhosttyKittyImageCompression).cast(),
-        )
-        .into_result()?;
-    }
-    Ok(out)
-}
-
-fn kitty_image_transmission_payload(
-    image: ffi::GhosttyKittyGraphicsImage,
-    decoded_format: KittyImageFormat,
-    forwarding: bool,
-) -> Result<(KittyImageFormat, *const u8, usize), Error> {
-    if !forwarding {
-        let (ptr, len) = kitty_image_data_ptr_len(image)?;
-        return Ok((decoded_format, ptr, len));
-    }
-    let mut ptr_out: *const u8 = ptr::null();
-    let result = unsafe {
-        ffi::ghostty_kitty_graphics_image_get(
-            image,
-            ffi::GhosttyKittyGraphicsImageData_GHOSTTY_KITTY_IMAGE_DATA_ENCODED_PNG_PTR,
-            (&mut ptr_out as *mut *const u8).cast(),
-        )
-    };
-    if result == ffi::GhosttyResult_GHOSTTY_NO_VALUE {
-        let (ptr, len) = kitty_image_data_ptr_len(image)?;
-        return Ok((decoded_format, ptr, len));
-    }
-    result.into_result()?;
-    let mut len = 0usize;
-    unsafe {
-        ffi::ghostty_kitty_graphics_image_get(
-            image,
-            ffi::GhosttyKittyGraphicsImageData_GHOSTTY_KITTY_IMAGE_DATA_ENCODED_PNG_LEN,
-            (&mut len as *mut usize).cast(),
-        )
-        .into_result()?;
-    }
-    Ok((KittyImageFormat::Png, ptr_out, len))
-}
-
-fn kitty_image_data_ptr_len(
-    image: ffi::GhosttyKittyGraphicsImage,
-) -> Result<(*const u8, usize), Error> {
-    let mut ptr_out: *const u8 = ptr::null();
-    let mut len = 0usize;
-    unsafe {
-        ffi::ghostty_kitty_graphics_image_get(
-            image,
-            ffi::GhosttyKittyGraphicsImageData_GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR,
-            (&mut ptr_out as *mut *const u8).cast(),
-        )
-        .into_result()?;
-        ffi::ghostty_kitty_graphics_image_get(
-            image,
-            ffi::GhosttyKittyGraphicsImageData_GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN,
-            (&mut len as *mut usize).cast(),
-        )
-        .into_result()?;
-    }
-    Ok((ptr_out, len))
-}
-
-fn kitty_image_data_from_ptr(ptr_out: *const u8, len: usize) -> Vec<u8> {
-    if ptr_out.is_null() || len == 0 {
-        return Vec::new();
-    }
-    unsafe { slice::from_raw_parts(ptr_out, len) }.to_vec()
-}
-
-// Hashes the full payload. Callers cache the result per image id and only
-// recompute it when the image's transmit time changes.
-fn kitty_image_fingerprint(
-    ptr_out: *const u8,
-    len: usize,
-    image_width: u32,
-    image_height: u32,
-    format: KittyImageFormat,
-) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    len.hash(&mut hasher);
-    image_width.hash(&mut hasher);
-    image_height.hash(&mut hasher);
-    format.hash(&mut hasher);
-    if ptr_out.is_null() || len == 0 {
-        return hasher.finish();
-    }
-
-    let data = unsafe { slice::from_raw_parts(ptr_out, len) };
-    data.hash(&mut hasher);
-    hasher.finish()
 }
 
 fn grid_ref_hyperlink_uri(grid_ref: &ffi::GhosttyGridRef) -> Result<Option<String>, Error> {
@@ -3774,7 +2662,7 @@ mod test_allocations;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     fn write_numbered_lines(terminal: &mut Terminal, count: usize) {
         for i in 0..count {
@@ -3866,217 +2754,17 @@ mod tests {
     }
 
     #[test]
-    fn kitty_png_replacement_rejects_invalid_payload_without_placing_it() {
-        use base64::Engine as _;
-        let mut png = Vec::new();
-        {
-            let mut encoder = png::Encoder::new(&mut png, 2, 1);
-            encoder.set_color(png::ColorType::Rgba);
-            encoder.set_depth(png::BitDepth::Eight);
-            let mut writer = encoder.write_header().unwrap();
-            writer
-                .write_image_data(&[255, 0, 0, 255, 0, 0, 255, 255])
-                .unwrap();
-        }
-        let mut terminal = Terminal::new(10, 5, 0).unwrap();
-        terminal.enable_kitty_graphics().unwrap();
-        let upload = |payload: &[u8]| {
-            format!(
-                "\x1b[H\x1b_Ga=T,f=100,i=7,p=3,c=2,r=1,q=2;{}\x1b\\",
-                base64::engine::general_purpose::STANDARD.encode(payload)
-            )
-        };
-        terminal.write(upload(&png).as_bytes());
-        let before = terminal.kitty_image_placements().unwrap();
-        assert_eq!(before.len(), 1);
-        assert_eq!((before[0].image_width, before[0].image_height), (2, 1));
-        assert_eq!(before[0].data, [255, 0, 0, 255, 0, 0, 255, 255]);
-        // The parser retires the old placement, but never places corrupt data.
-        terminal.write(upload(&png[..png.len() / 2]).as_bytes());
-        assert!(terminal.kitty_image_placements().unwrap().is_empty());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn kitty_file_image_survives_source_mutation_and_unlink() {
-        use base64::Engine as _;
-        let path = std::path::PathBuf::from(format!(
-            "/var/tmp/herdr-kitty-source-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::write(&path, [255, 0, 0, 255]).unwrap();
-        let mut terminal = Terminal::new(10, 5, 0).unwrap();
-        terminal.enable_kitty_graphics().unwrap();
-        terminal.write(
-            format!(
-                "\x1b_Ga=T,f=32,t=f,i=7,p=3,s=1,v=1,c=1,r=1,q=2;{}\x1b\\",
-                base64::engine::general_purpose::STANDARD.encode(path.to_str().unwrap())
-            )
-            .as_bytes(),
-        );
-        std::fs::write(&path, [0, 0, 255, 255]).unwrap();
-        std::fs::remove_file(&path).unwrap();
-        let placements = terminal.kitty_image_placements().unwrap();
-        assert_eq!(placements.len(), 1);
-        assert_eq!(placements[0].data, [255, 0, 0, 255]);
-    }
-
-    #[test]
-    fn kitty_image_fingerprint_covers_full_payload() {
-        let mut data = vec![1u8; 4096 * 4];
-        let original =
-            kitty_image_fingerprint(data.as_ptr(), data.len(), 100, 50, KittyImageFormat::Png);
-
-        data[4096 + 123] = 2;
-        let changed_outside_sampled_windows =
-            kitty_image_fingerprint(data.as_ptr(), data.len(), 100, 50, KittyImageFormat::Png);
-        assert_ne!(original, changed_outside_sampled_windows);
-    }
-
-    #[test]
-    fn kitty_image_fingerprint_refreshes_on_retransmission() {
-        let mut terminal = Terminal::new(10, 5, 0).unwrap();
-        terminal.enable_kitty_graphics().unwrap();
-        terminal.write(b"\x1b_Ga=T,f=32,t=d,i=7,p=3,s=1,v=1,c=10,r=5,q=2;/wAA/w==\x1b\\");
-        let first = terminal
-            .kitty_image_placements_with_data_filter(|_| true)
-            .unwrap();
-        assert_eq!(first.len(), 1);
-        let first_generation = terminal
-            .kitty_fingerprints
-            .lock()
-            .unwrap()
-            .get(&7)
-            .unwrap()
-            .generation;
-        assert_ne!(first_generation, 0);
-
-        // Retransmission removes old placements; transmit-and-display replaces it.
-        terminal.write(b"\x1b[H\x1b_Ga=T,f=32,t=d,i=7,p=3,s=1,v=1,c=10,r=5,q=2;AAAAAA==\x1b\\");
-        let second = terminal
-            .kitty_image_placements_with_data_filter(|_| true)
-            .unwrap();
-        assert_eq!(second.len(), 1);
-        assert_ne!(first[0].data_fingerprint, second[0].data_fingerprint);
-        let second_generation = terminal
-            .kitty_fingerprints
-            .lock()
-            .unwrap()
-            .get(&7)
-            .unwrap()
-            .generation;
-        assert_ne!(first_generation, second_generation);
-
-        // No retransmission, so the fingerprint and generation stay stable.
-        let third = terminal
-            .kitty_image_placements_with_data_filter(|_| true)
-            .unwrap();
-        assert_eq!(second[0].data_fingerprint, third[0].data_fingerprint);
-        assert_eq!(
-            terminal
-                .kitty_fingerprints
-                .lock()
-                .unwrap()
-                .get(&7)
-                .unwrap()
-                .generation,
-            second_generation
-        );
-    }
-
-    #[test]
-    fn kitty_image_fingerprint_survives_hidden_placements_until_the_image_is_deleted() {
-        let mut terminal = Terminal::new(10, 5, 0).unwrap();
-        terminal.enable_kitty_graphics().unwrap();
-        let cached =
-            |terminal: &Terminal| terminal.kitty_fingerprints.lock().unwrap().contains_key(&7);
-        terminal.write(b"\x1b_Ga=T,f=32,t=d,i=7,p=3,s=1,v=1,c=10,r=5,q=2;/wAA/w==\x1b\\");
-        assert_eq!(
-            terminal
-                .kitty_image_placements_with_data_filter(|_| false)
-                .unwrap()
-                .len(),
-            1
-        );
-        assert!(cached(&terminal));
-
-        terminal.write(b"\x1b_Ga=d,d=a,q=2\x1b\\");
-        assert!(terminal
-            .kitty_image_placements_with_data_filter(|_| false)
-            .unwrap()
-            .is_empty());
-        assert!(cached(&terminal), "a hidden image must not be re-hashed");
-
-        terminal.write(b"\x1b_Ga=d,d=I,i=7,q=2\x1b\\");
-        let _ = terminal.kitty_image_placements_with_data_filter(|_| false);
-        assert!(!cached(&terminal));
-    }
-
-    #[test]
-    fn kitty_storage_generation_skips_only_proven_empty_storage() {
-        let mut terminal = Terminal::new(10, 5, 1_000_000).unwrap();
-        assert!(!terminal.kitty_graphics_may_have_placements().unwrap());
-        terminal.enable_kitty_graphics().unwrap();
-        terminal.resize(10, 5, 8, 16).unwrap();
-
-        let initial_generation = terminal.kitty_graphics_generation().unwrap();
-        assert!(!terminal.kitty_graphics_may_have_placements().unwrap());
-        assert!(terminal.kitty_image_placements().unwrap().is_empty());
-
-        terminal.write(b"\x1b_Ga=t,t=d,f=24,i=1,s=1,v=2;////////\x1b\\");
-        let transmitted = terminal.kitty_graphics_generation().unwrap();
-        assert_ne!(transmitted, initial_generation);
-        assert!(terminal.kitty_graphics_may_have_placements().unwrap());
-        assert!(terminal.kitty_image_placements().unwrap().is_empty());
-        assert_eq!(terminal.kitty_empty_generation.get(), Some(transmitted));
-        assert!(!terminal.kitty_graphics_may_have_placements().unwrap());
-
-        terminal.write(b"plain text");
-        assert_eq!(terminal.kitty_graphics_generation().unwrap(), transmitted);
-        assert!(terminal.kitty_image_placements().unwrap().is_empty());
-
-        terminal.write(b"\x1b_Ga=p,i=1,p=1,c=1,r=1;\x1b\\");
-        let placed = terminal.kitty_graphics_generation().unwrap();
-        assert_ne!(placed, transmitted);
-        assert!(terminal.kitty_graphics_may_have_placements().unwrap());
-        assert_eq!(terminal.kitty_image_placements().unwrap().len(), 1);
-
-        terminal.resize(10, 5, 12, 24).unwrap();
-        assert_eq!(terminal.kitty_graphics_generation().unwrap(), placed);
-        assert_eq!(terminal.kitty_image_placements().unwrap().len(), 1);
-
-        write_numbered_lines(&mut terminal, 20);
-        assert_eq!(terminal.kitty_graphics_generation().unwrap(), placed);
-        assert!(terminal.kitty_image_placements().unwrap().is_empty());
-        assert_ne!(terminal.kitty_empty_generation.get(), Some(placed));
-        assert!(terminal.kitty_graphics_may_have_placements().unwrap());
-        terminal.scroll_viewport_row(0);
-        assert_eq!(terminal.kitty_image_placements().unwrap().len(), 1);
-
-        // Delete-visible must preserve images in scrollback, even while viewed.
-        terminal.write(b"\x1b_Ga=d,d=A\x1b\\");
-        assert_eq!(terminal.kitty_graphics_generation().unwrap(), placed);
-        assert_eq!(terminal.kitty_image_placements().unwrap().len(), 1);
-        terminal.write(b"\x1b_Ga=d,d=I,i=1\x1b\\");
-        let deleted = terminal.kitty_graphics_generation().unwrap();
-        assert_ne!(deleted, placed);
-        assert!(terminal.kitty_graphics_may_have_placements().unwrap());
-        assert!(terminal.kitty_image_placements().unwrap().is_empty());
-        assert_eq!(terminal.kitty_empty_generation.get(), Some(deleted));
-        assert!(!terminal.kitty_graphics_may_have_placements().unwrap());
-    }
-
-    #[test]
     fn build_info_contract_matches_expected_vendored_features() {
-        let _simd = build_info_bool(ffi::GhosttyBuildInfo_GHOSTTY_BUILD_INFO_SIMD);
+        let simd = build_info_bool(ffi::GhosttyBuildInfo_GHOSTTY_BUILD_INFO_SIMD);
         let _tmux_control_mode =
             build_info_bool(ffi::GhosttyBuildInfo_GHOSTTY_BUILD_INFO_TMUX_CONTROL_MODE);
-        let _kitty_graphics =
+        let kitty_graphics =
             build_info_bool(ffi::GhosttyBuildInfo_GHOSTTY_BUILD_INFO_KITTY_GRAPHICS);
+        assert!(!simd, "pre-transpiled C99 core must disable SIMD");
+        assert!(
+            !kitty_graphics,
+            "pre-transpiled C99 core must compile out Kitty graphics"
+        );
 
         let optimize = build_info_optimize();
         assert!(matches!(
@@ -4089,33 +2777,14 @@ mod tests {
     }
 
     #[test]
-    fn kitty_graphics_direct_rgba_placement_is_queryable() {
-        let mut terminal = Terminal::new(10, 5, 0).unwrap();
-        terminal.enable_kitty_graphics().unwrap();
-        terminal.resize(10, 5, 8, 16).unwrap();
-        terminal.write(b"\x1b_Ga=T,f=32,t=d,i=7,p=3,s=1,v=1,c=10,r=5,q=2;/wAA/w==\x1b\\");
-
-        let placements = terminal.kitty_image_placements().unwrap();
-        assert_eq!(placements.len(), 1);
-        assert_eq!(placements[0].image_id, 7);
-        assert_eq!(placements[0].placement_id, 3);
-        assert_eq!(placements[0].image_width, 1);
-        assert_eq!(placements[0].image_height, 1);
-        assert_eq!(placements[0].format, KittyImageFormat::Rgba);
-        assert_eq!(placements[0].data, [255, 0, 0, 255]);
-        assert_eq!(placements[0].render.grid_cols, 10);
-        assert_eq!(placements[0].render.grid_rows, 5);
-    }
-
-    #[test]
-    fn kitty_graphics_queries_require_explicit_enablement() {
+    fn kitty_graphics_queries_are_ignored_when_compiled_out() {
         let mut terminal = Terminal::new(10, 5, 0).unwrap();
         let responses = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
         let sink = responses.clone();
         terminal
             .set_write_pty_callback(move |bytes| sink.lock().unwrap().extend_from_slice(bytes))
             .unwrap();
-        // The reporter's direct, compressed RGBA capability probe followed by DA1.
+        // Direct, compressed RGBA capability probe followed by DA1.
         let query = b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=32,o=z;eAFjYGBgAAAABAAB\x1b\\\x1b[c";
 
         for enabled in [false, true] {
@@ -4128,14 +2797,9 @@ mod tests {
                 }
                 responses.lock().unwrap().clear();
                 terminal.write(query);
-                let expected: &[u8] = if enabled {
-                    b"\x1b_Gi=31;OK\x1b\\\x1b[?62;22c"
-                } else {
-                    b"\x1b[?62;22c"
-                };
                 assert_eq!(
                     responses.lock().unwrap().as_slice(),
-                    expected,
+                    b"\x1b[?62;22c",
                     "enabled={enabled}, reset={reset}"
                 );
             }
@@ -4145,133 +2809,18 @@ mod tests {
     #[test]
     fn disabled_kitty_graphics_discards_uploads_across_screen_changes() {
         let mut terminal = Terminal::new(10, 5, 0).unwrap();
+        assert_eq!(terminal.kitty_graphics_generation().unwrap(), 0);
+        assert!(!terminal.kitty_graphics_may_have_placements().unwrap());
+        assert_eq!(
+            terminal.kitty_image_fingerprints(&[1, 7]).unwrap(),
+            vec![None, None]
+        );
         for sequence in [b"".as_slice(), b"\x1b[?1049h", b"\x1b[?1049l"] {
             terminal.write(sequence);
             terminal.resize(12, 6, 8, 16).unwrap();
             terminal.write(b"\x1b_Ga=T,f=32,t=d,i=7,p=3,s=1,v=1,c=1,r=1;/wAA/w==\x1b\\");
             assert!(terminal.kitty_image_placements().unwrap().is_empty());
         }
-    }
-
-    #[test]
-    fn kitty_graphics_local_media_are_enabled() {
-        let mut terminal = Terminal::new(10, 5, 0).unwrap();
-        terminal.enable_kitty_graphics().unwrap();
-
-        assert!(terminal
-            .get_bool(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE)
-            .unwrap());
-        let mut temp_dir = ffi::GhosttyString::default();
-        unsafe {
-            ffi::ghostty_terminal_get(
-                terminal.raw,
-                ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE,
-                (&mut temp_dir as *mut ffi::GhosttyString).cast(),
-            )
-            .into_result()
-            .unwrap();
-            assert_eq!(
-                borrowed_bytes(temp_dir).unwrap(),
-                std::env::temp_dir().to_string_lossy().as_bytes()
-            );
-        }
-        assert!(terminal
-            .get_bool(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_SHARED_MEM)
-            .unwrap());
-    }
-
-    #[test]
-    fn kitty_graphics_file_medium_rgba_placement_is_queryable() {
-        use base64::Engine;
-
-        let dir = std::env::temp_dir().join(format!(
-            "herdr-kitty-file-medium-test-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("pixel.rgba");
-        std::fs::write(&path, [255, 0, 0, 255]).unwrap();
-
-        let mut terminal = Terminal::new(10, 5, 0).unwrap();
-        terminal.enable_kitty_graphics().unwrap();
-        terminal.resize(10, 5, 8, 16).unwrap();
-        let encoded_path =
-            base64::engine::general_purpose::STANDARD.encode(path.as_os_str().as_encoded_bytes());
-        let command =
-            format!("\x1b_Ga=T,f=32,t=f,i=9,p=4,s=1,v=1,c=10,r=5,q=2;{encoded_path}\x1b\\");
-        terminal.write(command.as_bytes());
-        terminal.write(b"\x1b_Ga=p,U=1,i=9,c=10,r=5\x1b\\");
-
-        let placements = terminal.kitty_image_placements().unwrap();
-        assert_eq!(placements.len(), 1);
-        assert_eq!(placements[0].image_id, 9);
-        assert_eq!(placements[0].placement_id, 4);
-        assert_eq!(placements[0].image_width, 1);
-        assert_eq!(placements[0].image_height, 1);
-        assert_eq!(placements[0].format, KittyImageFormat::Rgba);
-        assert_eq!(placements[0].data, [255, 0, 0, 255]);
-        assert_eq!(placements[0].render.grid_cols, 10);
-        assert_eq!(placements[0].render.grid_rows, 5);
-
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn kitty_graphics_file_upload_can_be_placed_later() {
-        use base64::Engine as _;
-
-        let dir = std::env::temp_dir().join(format!(
-            "herdr-kitty-file-upload-test-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("pixel.rgba");
-        std::fs::write(&path, [255, 0, 0, 255]).unwrap();
-
-        let mut terminal = Terminal::new(10, 5, 0).unwrap();
-        terminal.enable_kitty_graphics().unwrap();
-        terminal.resize(10, 5, 8, 16).unwrap();
-        let payload =
-            base64::engine::general_purpose::STANDARD.encode(path.to_str().unwrap().as_bytes());
-        let upload = format!("\x1b7\x1b_Ga=t,f=32,s=1,v=1,i=10,q=0,t=f;{payload}\x1b\\\x1b8");
-        terminal.write(upload.as_bytes());
-        assert!(terminal.kitty_image_placements().unwrap().is_empty());
-
-        terminal.write(b"\x1b_Ga=p,i=10,p=5,c=10,r=5,C=1,q=2\x1b\\");
-        let placements = terminal.kitty_image_placements().unwrap();
-        assert_eq!(placements.len(), 1);
-        assert_eq!(placements[0].image_id, 10);
-        assert_eq!(placements[0].placement_id, 5);
-        assert_eq!(placements[0].image_width, 1);
-        assert_eq!(placements[0].image_height, 1);
-        assert_eq!(placements[0].format, KittyImageFormat::Rgba);
-        assert_eq!(placements[0].data, [255, 0, 0, 255]);
-
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn kitty_graphics_unicode_placeholder_placement_is_queryable() {
-        let mut terminal = Terminal::new(10, 5, 0).unwrap();
-        terminal.enable_kitty_graphics().unwrap();
-        terminal.resize(10, 5, 8, 16).unwrap();
-        terminal.write(b"\x1b_Gq=2,a=t,t=d,f=32,s=1,v=1,i=1193046,m=0;/wAA/w==\x1b\\");
-        terminal.write(b"\x1b_Gq=2,a=p,U=1,i=1193046,c=2,r=1\x1b\\");
-        terminal.write("\x1b[2;3H\x1b[38;2;18;52;86m\u{10eeee}\u{0305}\u{0305}\u{10eeee}\u{0305}\u{030d}\x1b[0m".as_bytes());
-
-        let placements = terminal.kitty_image_placements().unwrap();
-        assert_eq!(placements.len(), 1);
-        assert_eq!(placements[0].image_id, 1193046);
-        assert_ne!(placements[0].placement_id, 0);
-        assert_eq!(placements[0].image_width, 1);
-        assert_eq!(placements[0].image_height, 1);
-        assert_eq!(placements[0].format, KittyImageFormat::Rgba);
-        assert_eq!(placements[0].data, [255, 0, 0, 255]);
-        assert_eq!(placements[0].render.viewport_col, 2);
-        assert_eq!(placements[0].render.viewport_row, 1);
-        assert_eq!(placements[0].render.grid_cols, 2);
-        assert_eq!(placements[0].render.grid_rows, 1);
     }
 
     #[test]

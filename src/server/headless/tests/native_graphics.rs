@@ -571,6 +571,9 @@ fn write_chunked_test_image(
 
 #[tokio::test]
 async fn delta_encoded_inline_commit_updates_next_native_bank() {
+    if !crate::ghostty::kitty_graphics_compiled_in() {
+        return;
+    }
     let (mut server, _control, _render, pane) = retained_test_server_with_control(
         b"\x1b_Ga=T,f=32,t=d,i=7,p=3,s=1,v=1,c=1,r=1,q=2;/wAA/w==\x1b\\",
     );
@@ -652,6 +655,9 @@ async fn delta_encoded_inline_commit_updates_next_native_bank() {
 
 #[tokio::test]
 async fn oversized_native_scene_queues_file_and_continues_stripped_assets_after_ack() {
+    if !crate::ghostty::kitty_graphics_compiled_in() {
+        return;
+    }
     let (mut server, _control, _render, pane) = retained_test_server_with_control(b"");
     let writer = ClientWriter::test_paused();
     let client = server.clients.get_mut(&1).unwrap();
@@ -726,6 +732,9 @@ async fn oversized_native_scene_queues_file_and_continues_stripped_assets_after_
 
 #[tokio::test]
 async fn oversized_inline_trims_largest_and_sends_fitting_asset_without_retry_spin() {
+    if !crate::ghostty::kitty_graphics_compiled_in() {
+        return;
+    }
     let (mut server, _control, _render, pane) = retained_test_server_with_control(b"");
     let writer = ClientWriter::test_paused();
     let client = server.clients.get_mut(&1).unwrap();
@@ -811,6 +820,9 @@ async fn oversized_inline_trims_largest_and_sends_fitting_asset_without_retry_sp
 
 #[tokio::test]
 async fn quiet_native_producer_geometry_retirement_schedules_full_inline_recovery() {
+    if !crate::ghostty::kitty_graphics_compiled_in() {
+        return;
+    }
     for retained in [false, true] {
         let (mut server, _control, _render, pane) = retained_test_server_with_control(
             b"\x1b_Ga=T,f=32,t=d,i=7,p=3,s=1,v=1,c=1,r=1,q=2;/wAA/w==\x1b\\",

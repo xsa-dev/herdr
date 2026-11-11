@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write as FmtWrite;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use base64::Engine;
 use ratatui::layout::Rect;
@@ -110,14 +109,10 @@ pub(crate) struct HostGraphicsCache {
     replayed_placements: HashSet<(u32, u32)>,
 }
 
-static KITTY_GRAPHICS_ENABLED: AtomicBool = AtomicBool::new(false);
-
-pub(crate) fn set_enabled(enabled: bool) {
-    KITTY_GRAPHICS_ENABLED.store(enabled, Ordering::Release);
-}
+pub(crate) fn set_enabled(_enabled: bool) {}
 
 pub(crate) fn is_enabled() -> bool {
-    KITTY_GRAPHICS_ENABLED.load(Ordering::Acquire)
+    false
 }
 
 pub(crate) fn image_transfer_estimated_size(data_len: usize) -> usize {

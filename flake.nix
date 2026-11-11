@@ -20,8 +20,6 @@
       systems = [
         "x86_64-linux"
         "aarch64-linux"
-        "x86_64-darwin"
-        "aarch64-darwin"
       ];
       forAllSystems = lib.genAttrs systems;
       pkgsFor =
@@ -88,18 +86,10 @@
             name = "herdr-dev";
             packages = with pkgs; [
               cargo-nextest
-              cmake
               just
-              ninja
               pkg-config
               rustToolchain
-              zig_0_16
             ];
-
-            env = {
-              LIBGHOSTTY_VT_OPTIMIZE = "Debug";
-              LIBGHOSTTY_VT_SIMD = "true";
-            };
           };
         }
       );
