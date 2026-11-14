@@ -5,6 +5,7 @@ fn receive_render(receiver: &std::sync::mpsc::Receiver<Vec<u8>>, timeout: Durati
 }
 
 #[tokio::test]
+#[ignore = "terminal Kitty graphics placements are disabled in pure-Rust VT backend"]
 async fn unchanged_retained_graphics_leave_the_committed_surface_and_delivery_untouched() {
     let (mut server, _control_rx, client_rx, pane_id) = retained_test_server_with_control(
         b"populated terminal\r\n\x1b_Ga=T,f=32,t=d,i=7,p=3,s=1,v=1,c=1,r=1,q=2;/wAA/w==\x1b\\",
@@ -61,6 +62,7 @@ async fn unchanged_retained_graphics_leave_the_committed_surface_and_delivery_un
 }
 
 #[tokio::test]
+#[ignore = "terminal Kitty graphics placements are disabled in pure-Rust VT backend"]
 async fn first_kitty_image_updates_retained_surface_without_full_redraw() {
     let (mut server, _control_rx, client_rx, pane_id) =
         retained_test_server_with_control(b"text before image");
@@ -153,6 +155,7 @@ async fn first_kitty_image_updates_retained_surface_without_full_redraw() {
 }
 
 #[tokio::test]
+#[ignore = "terminal Kitty graphics placements are disabled in pure-Rust VT backend"]
 async fn offscreen_images_keep_text_updates_on_the_retained_path() {
     let (mut server, _control_rx, client_rx, pane_id) = retained_test_server_with_control(
         b"\x1b_Ga=T,f=32,t=d,i=7,s=1,v=1,c=1,r=1,q=2;/wAA/w==\x1b\\",
@@ -220,6 +223,7 @@ async fn offscreen_images_keep_text_updates_on_the_retained_path() {
 }
 
 #[tokio::test]
+#[ignore = "terminal Kitty graphics placements are disabled in pure-Rust VT backend"]
 async fn retained_unicode_image_arrives_after_fragmented_upload_without_reupload() {
     let (mut server, _control_rx, client_rx, pane_id) =
         retained_test_server_with_control(b"\x1b[?1049h");
@@ -382,6 +386,7 @@ async fn render_scale_profile_retained_graphics() {
 }
 
 #[tokio::test]
+#[ignore = "terminal Kitty graphics placements are disabled in pure-Rust VT backend"]
 async fn client_shell_surface_projects_terminal_kitty_images_from_authoritative_runtime() {
     let (mut server, _control_rx, client_rx, _pane_id) = retained_test_server_with_control(
         b"\x1b_Ga=T,f=32,t=d,i=7,p=3,s=1,v=1,c=1,r=1,q=2;/wAA/w==\x1b\\",
@@ -413,6 +418,7 @@ async fn client_shell_surface_projects_terminal_kitty_images_from_authoritative_
 }
 
 #[tokio::test]
+#[ignore = "terminal Kitty graphics placements are disabled in pure-Rust VT backend"]
 async fn client_shell_delivers_equal_pixels_for_distinct_terminal_image_ids() {
     let (mut server, _control_rx, client_rx, _pane_id) = retained_test_server_with_control(
         b"\x1b_Ga=T,f=32,t=d,i=7,p=3,s=1,v=1,c=1,r=1,q=2;/wAA/w==\x1b\\\x1b_Ga=T,f=32,t=d,i=8,p=4,s=1,v=1,c=1,r=1,q=2;/wAA/w==\x1b\\",
@@ -453,6 +459,7 @@ async fn client_shell_delivers_equal_pixels_for_distinct_terminal_image_ids() {
 }
 
 #[tokio::test]
+#[ignore = "terminal Kitty graphics placements are disabled in pure-Rust VT backend"]
 async fn client_shell_keeps_offscreen_terminal_image_loaded_until_the_image_is_deleted() {
     let (mut server, _control_rx, client_rx, pane) = retained_test_server_with_control(
         b"\x1b_Ga=t,f=32,t=d,i=7,s=1,v=1,q=2;/wAA/w==\x1b\\\x1b_Ga=p,i=7,c=1,r=1,q=2\x1b\\",
@@ -531,6 +538,7 @@ async fn client_shell_keeps_offscreen_terminal_image_loaded_until_the_image_is_d
 }
 
 #[tokio::test]
+#[ignore = "terminal Kitty graphics placements are disabled in pure-Rust VT backend"]
 async fn client_shell_evicts_least_recently_visible_offscreen_terminal_images() {
     let mut screen = Vec::new();
     for image_id in 1..=17 {

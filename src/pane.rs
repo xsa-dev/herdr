@@ -5333,6 +5333,7 @@ mod tests {
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[tokio::test]
+    #[ignore = "terminal page compression is disabled in pure-Rust VT backend"]
     async fn compression_task_rechecks_history_after_a_read() {
         let suffix = "x".repeat(66);
         let history = (1..=2_000)
@@ -5365,6 +5366,7 @@ mod tests {
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[tokio::test]
+    #[ignore = "terminal page compression is disabled in pure-Rust VT backend"]
     async fn compressed_scrollback_survives_shrink_and_grow_resize() {
         let suffix = "x".repeat(66);
         let history = (1..=2_000)

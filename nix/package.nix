@@ -2,10 +2,6 @@
   lib,
   stdenv,
   rustPlatform,
-  callPackage,
-  runCommand,
-  zig_0_16,
-  zstd,
   pkg-config,
   git,
   cctools ? null,
@@ -14,18 +10,6 @@
 
 let
   manifest = lib.importTOML ../Cargo.toml;
-  zigDeps = callPackage ../vendor/libghostty-vt/build.zig.zon.nix {
-    name = "herdr-libghostty-vt-zig-cache";
-    inherit zstd;
-    linkFarm =
-      name: entries:
-      runCommand name { } ''
-        mkdir -p $out
-        ${lib.concatMapStringsSep "\n" (entry: ''
-          cp -rL ${entry.path} $out/${entry.name}
-        '') entries}
-      '';
-  };
   darwinToolchain = lib.optionals stdenv.hostPlatform.isDarwin [
     cctools
     xcbuild
@@ -44,8 +28,6 @@ rustPlatform.buildRustPackage {
         ../distribution/install.ps1
         ../docs/next/api/herdr-api.schema.json
         ../src
-        ../vendor/libghostty-vt
-        ../vendor/libghostty-vt.vendor.json
         ../vendor/portable-pty
         ../build.rs
         ../Cargo.lock
@@ -63,18 +45,6 @@ rustPlatform.buildRustPackage {
     git
     pkg-config
   ] ++ darwinToolchain;
-
-  env = {
-    LIBGHOSTTY_VT_OPTIMIZE = "ReleaseFast";
-    LIBGHOSTTY_VT_SIMD = "true";
-    LIBGHOSTTY_VT_ZIG_SYSTEM_DIR = zigDeps;
-    ZIG = lib.getExe zig_0_16;
-  };
-
-  preBuild = ''
-    export ZIG_GLOBAL_CACHE_DIR="$TMPDIR/zig-global-cache"
-    export ZIG_LOCAL_CACHE_DIR="$TMPDIR/zig-local-cache"
-  '';
 
   # Rust tests are covered by the normal CI workflow. The Nix check is
   # intentionally build-only so it validates packaging inputs without

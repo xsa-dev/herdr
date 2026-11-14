@@ -150,6 +150,7 @@ async fn surface_delta_updates_global_popup_without_affecting_legacy_peer() {
 }
 
 #[tokio::test]
+#[ignore = "terminal Kitty graphics placements are disabled in pure-Rust VT backend"]
 async fn surface_delta_preserves_graphics_baseline_through_queue_recovery() {
     let (mut server, _control_rx, render_rx, pane_id) =
         retained_test_server_with_control(b"text before image");

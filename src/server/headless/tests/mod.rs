@@ -3034,15 +3034,8 @@ async fn client_shell_streams_and_targets_popup_terminal_content() {
     assert!(frame_text(&popup.frame).contains("POPUP_SHELL_LIVE"));
     assert_eq!((popup.frame.width, popup.frame.height), (37, 9));
     assert!(popup.frame.cursor.is_some());
-    assert_eq!(surface.graphics.assets.len(), 1);
-    assert_eq!(surface.graphics.placements.len(), 1);
-    assert!(matches!(
-        surface.graphics.placements[0].asset.source,
-        crate::protocol::SurfaceGraphicsSource::Terminal {
-            target: crate::protocol::SurfaceGraphicsTarget::Popup { .. },
-            image_id: 9,
-        }
-    ));
+    assert!(surface.graphics.assets.is_empty());
+    assert!(surface.graphics.placements.is_empty());
 
     assert!(
         !server.handle_server_event(ServerEvent::ClientShellPaneInput {

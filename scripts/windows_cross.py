@@ -10,7 +10,7 @@ import tempfile
 
 
 SDK_ROOT = Path.home() / ".local/share/herdr/windows-cross"
-LIBC_ENV = "LIBGHOSTTY_VT_WINDOWS_LIBC"
+LIBC_ENV = "HERDR_WINDOWS_SDK_CONFIG"
 TARGET = "x86_64-pc-windows-msvc"
 
 
@@ -42,7 +42,7 @@ def libc_path() -> Path:
         raise ValueError(
             f"Windows cross-check needs SDK configuration at {path}.\n"
             "Run `just setup-windows-cross` once, or set "
-            f"{LIBC_ENV} to an existing Zig libc configuration."
+            f"{LIBC_ENV} to an existing SDK configuration."
         )
     return path.resolve()
 
@@ -50,8 +50,6 @@ def libc_path() -> Path:
 def setup(accept_license: bool) -> None:
     if not shutil.which("xwin"):
         raise ValueError("Install xwin first: cargo install xwin --locked")
-    if not shutil.which(os.environ.get("ZIG", "zig")):
-        raise ValueError("Install Zig 0.16.0 first, or set ZIG to its executable.")
     SDK_ROOT.mkdir(parents=True, exist_ok=True)
     # SDK downloads can be large; /tmp is often RAM-backed on Linux.
     temp_parent = "/var/tmp" if sys.platform.startswith("linux") else None
@@ -62,15 +60,11 @@ def setup(accept_license: bool) -> None:
         subprocess.run(command + ["splat", "--copy", "--output", str(SDK_ROOT)], check=True)
     config = SDK_ROOT / "libc.txt"
     config.write_text(libc_contents(SDK_ROOT))
-    subprocess.run(
-        [os.environ.get("ZIG", "zig"), "libc", "-target", "x86_64-windows-msvc", str(config)],
-        check=True,
-    )
     print(f"Windows SDK configured at {config}. Run `just windows-lint` or `just check`.")
 
 
 def lint() -> None:
-    env = {**os.environ, LIBC_ENV: str(libc_path()), "LIBGHOSTTY_VT_SIMD": "false"}
+    env = {**os.environ, LIBC_ENV: str(libc_path())}
     subprocess.run(["rustup", "target", "add", TARGET], check=True)
     subprocess.run(
         # --tests also checks Windows-only test code, which Unix builds never compile.

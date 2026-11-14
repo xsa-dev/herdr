@@ -570,6 +570,7 @@ fn write_chunked_test_image(
 }
 
 #[tokio::test]
+#[ignore = "terminal Kitty graphics placements are disabled in pure-Rust VT backend"]
 async fn delta_encoded_inline_commit_updates_next_native_bank() {
     let (mut server, _control, _render, pane) = retained_test_server_with_control(
         b"\x1b_Ga=T,f=32,t=d,i=7,p=3,s=1,v=1,c=1,r=1,q=2;/wAA/w==\x1b\\",
@@ -651,6 +652,7 @@ async fn delta_encoded_inline_commit_updates_next_native_bank() {
 }
 
 #[tokio::test]
+#[ignore = "terminal Kitty graphics placements are disabled in pure-Rust VT backend"]
 async fn oversized_native_scene_queues_file_and_continues_stripped_assets_after_ack() {
     let (mut server, _control, _render, pane) = retained_test_server_with_control(b"");
     let writer = ClientWriter::test_paused();
@@ -725,6 +727,7 @@ async fn oversized_native_scene_queues_file_and_continues_stripped_assets_after_
 }
 
 #[tokio::test]
+#[ignore = "terminal Kitty graphics placements are disabled in pure-Rust VT backend"]
 async fn oversized_inline_trims_largest_and_sends_fitting_asset_without_retry_spin() {
     let (mut server, _control, _render, pane) = retained_test_server_with_control(b"");
     let writer = ClientWriter::test_paused();
@@ -810,6 +813,7 @@ async fn oversized_inline_trims_largest_and_sends_fitting_asset_without_retry_sp
 }
 
 #[tokio::test]
+#[ignore = "terminal Kitty graphics placements are disabled in pure-Rust VT backend"]
 async fn quiet_native_producer_geometry_retirement_schedules_full_inline_recovery() {
     for retained in [false, true] {
         let (mut server, _control, _render, pane) = retained_test_server_with_control(
