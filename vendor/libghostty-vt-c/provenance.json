@@ -12,7 +12,9 @@
   },
   "targets": [
     "x86_64-linux-gnu",
-    "aarch64-linux-gnu"
+    "aarch64-linux-gnu",
+    "x86_64-macos",
+    "aarch64-macos"
   ],
   "active_text_patches": [
     {
@@ -64,8 +66,16 @@
       "sha256": "d5ff4fdb26692a96b9e507751f9e3f21c39988e1f0f1b1b6725e0118ade3ca8b"
     },
     {
+      "path": "ghostty_vt_aarch64_macos.c",
+      "sha256": "78b9dc35a47d309e77b81e64f102f70de2b33949eb542ef64c43e7f3945120f7"
+    },
+    {
       "path": "ghostty_vt_x86_64_linux.c",
       "sha256": "d3b8ab8553781b39d04536a86c6fb7cbc2e504aa274a89cba3bdef46b698318b"
+    },
+    {
+      "path": "ghostty_vt_x86_64_macos.c",
+      "sha256": "e6317d818f9fd84552ebf2d630f000879a274a90e1d1b60c26ffedd11d287405"
     },
     {
       "path": "include/ghostty/vt/allocator.h",

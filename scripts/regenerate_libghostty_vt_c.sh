@@ -148,10 +148,14 @@ COMMON_FLAGS=(
 
 /opt/zig/zig build "${COMMON_FLAGS[@]}" -Dtarget=x86_64-linux-gnu -p /tmp/out-x86_64
 /opt/zig/zig build "${COMMON_FLAGS[@]}" -Dtarget=aarch64-linux-gnu -p /tmp/out-aarch64
+/opt/zig/zig build "${COMMON_FLAGS[@]}" -Dtarget=x86_64-macos -p /tmp/out-x86_64-macos
+/opt/zig/zig build "${COMMON_FLAGS[@]}" -Dtarget=aarch64-macos -p /tmp/out-aarch64-macos
 
 cp /opt/zig/lib/zig.h /out/zig.h
 cp /tmp/out-x86_64/ghostty_vt.c /out/ghostty_vt_x86_64_linux.c
 cp /tmp/out-aarch64/ghostty_vt.c /out/ghostty_vt_aarch64_linux.c
+cp /tmp/out-x86_64-macos/ghostty_vt.c /out/ghostty_vt_x86_64_macos.c
+cp /tmp/out-aarch64-macos/ghostty_vt.c /out/ghostty_vt_aarch64_macos.c
 
 # Fix Zig 0.16.0 C backend (-ofmt=c) codegen bug on @bitCast(@Vector(N, bool)):
 # Zig emits `struct vec_N_bool { bool array[N]; }` (N bytes, 1 byte per bool)
@@ -169,7 +173,12 @@ BYTE_ALIGNED_ELEMS = {
     "f16", "f32", "f64",
 }
 
-for c_path in [Path("/out/ghostty_vt_x86_64_linux.c"), Path("/out/ghostty_vt_aarch64_linux.c")]:
+for c_path in [
+    Path("/out/ghostty_vt_x86_64_linux.c"),
+    Path("/out/ghostty_vt_aarch64_linux.c"),
+    Path("/out/ghostty_vt_x86_64_macos.c"),
+    Path("/out/ghostty_vt_aarch64_macos.c"),
+]:
     lines = c_path.read_text().splitlines()
     subbyte_defs = {}
     for ln in lines:
@@ -296,6 +305,8 @@ CFLAGS=(-std=c99 -O3 -fno-strict-aliasing -fwrapv -fPIC -Wno-unused-function -Wn
 gcc "${CFLAGS[@]}" -I/out -c "${HOST_C}" -o /tmp/vt_host.o
 gcc "${CFLAGS[@]}" -c /out/zig_rt_shims.c -o /tmp/shims_host.o
 /opt/zig/zig cc -target "${CROSS_TARGET}" "${CFLAGS[@]}" -Wno-parentheses-equality -I/out -c "${CROSS_C}" -o /tmp/vt_cross.o
+/opt/zig/zig cc -target "x86_64-macos" "${CFLAGS[@]}" -Wno-parentheses-equality -I/out -c /out/ghostty_vt_x86_64_macos.c -o /tmp/vt_x86_64_macos.o
+/opt/zig/zig cc -target "aarch64-macos" "${CFLAGS[@]}" -Wno-parentheses-equality -I/out -c /out/ghostty_vt_aarch64_macos.c -o /tmp/vt_aarch64_macos.o
 
 cat > /tmp/smoke.c << "EOF"
 #include <assert.h>
@@ -403,6 +414,8 @@ provenance = {
     "targets": [
         "x86_64-linux-gnu",
         "aarch64-linux-gnu",
+        "x86_64-macos",
+        "aarch64-macos",
     ],
     "active_text_patches": active_text_patches,
     "all_vendored_patches": all_patches,

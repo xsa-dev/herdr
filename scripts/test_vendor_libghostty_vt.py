@@ -160,7 +160,10 @@ class VendorLibghosttyVtTests(unittest.TestCase):
         self.assertEqual(generator["zig_version"], "0.16.0")
         self.assertFalse(generator["simd"])
         self.assertFalse(generator["kitty_graphics"])
-        self.assertEqual(provenance["targets"], ["x86_64-linux-gnu", "aarch64-linux-gnu"])
+        self.assertEqual(
+            provenance["targets"],
+            ["x86_64-linux-gnu", "aarch64-linux-gnu", "x86_64-macos", "aarch64-macos"],
+        )
 
         expected_active_patches = [
             "vendor/patches/libghostty-vt/0002-expose-modify-other-keys-mode.patch",

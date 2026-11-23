@@ -1,12 +1,19 @@
 {
   lib,
+  stdenv,
   rustPlatform,
   pkg-config,
   git,
+  cctools ? null,
+  xcbuild ? null,
 }:
 
 let
   manifest = lib.importTOML ../Cargo.toml;
+  darwinToolchain = lib.optionals stdenv.hostPlatform.isDarwin [
+    cctools
+    xcbuild
+  ];
 in
 rustPlatform.buildRustPackage {
   pname = "herdr";
@@ -39,7 +46,7 @@ rustPlatform.buildRustPackage {
   nativeBuildInputs = [
     git
     pkg-config
-  ];
+  ] ++ darwinToolchain;
 
   # Rust tests are covered by the normal CI workflow. The Nix check is
   # intentionally build-only so it validates packaging inputs without
@@ -54,6 +61,8 @@ rustPlatform.buildRustPackage {
     platforms = [
       "x86_64-linux"
       "aarch64-linux"
+      "x86_64-darwin"
+      "aarch64-darwin"
     ];
   };
 }
